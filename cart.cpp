@@ -17,7 +17,7 @@ namespace cash::GB
       size++;
       file.get();
     }
-
+    size--;
     rom = new bit8[size];
     file.close();
     file.open(fileName);
@@ -110,6 +110,7 @@ namespace cash::GB
     out << "ramBank: \t" << cart.ramBanks << endl;
     out << "destination: \t" << (cart.destination ? "Japan" : "Worldwide") << endl;
     out << "version: \t" << +cart.version << endl;
+    out << "global checksum:" << std::hex << ((cart.rom[0x014E] << 8) | cart.rom[0x014F]) << endl;
 
     return out;
   }

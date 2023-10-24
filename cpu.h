@@ -154,7 +154,7 @@ namespace cash::GB
     bit16 memLoc = 0x0000;
     bit16 value = 0x0000;
     bit8 cycle = 0x00;
-    const Instruction const *currentInstruction;
+    const Instruction *currentInstruction;
     bool IME = false;
     bool stopSystem = false;
     bool stopMain = false;
