@@ -13,6 +13,5 @@ int main(int argc, char **argv)
 
   cash::GB::Cart cart = Cart(std::string(argv[1]));
   std::cout << cart << std::endl;
-  cash::GB::
   return 0;
 }
