@@ -33,3 +33,7 @@
 
 # Roms
 roms/
+
+# Added by cargo
+
+/target
