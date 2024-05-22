@@ -3,6 +3,8 @@ use std::{fs::File, io::Read, path::Path};
 use cart::{Cart, CartError};
 
 pub mod cart;
+pub mod cpu;
+pub mod register;
 
 pub fn read_cart(path: &str) -> Result<Cart, CartError> {
     let mut data: Vec<u8> = vec![];
