@@ -356,7 +356,7 @@ impl Cart {
                 return Some(self.rom[addr as usize]);
             }
             0xA000..=0xBFFF => {
-                let addr = *addr as u32 + (0x2000 as u32 * self.current_ram_bank as u32);
+                let addr = *addr as u32 + (0x2000 as u32 * self.current_ram_bank as u32) - 0xA000;
                 if self.ram_size < addr {
                     return None;
                 }

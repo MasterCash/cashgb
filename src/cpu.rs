@@ -362,6 +362,10 @@ pub struct Cpu {
     boot_rom: [u8; 0x100],
     step_count: u8,
     instruction: Instruction,
+    v_ram: [[u8; 0x1FFF]; 2],
+    v_ram_bank: u8,
+    w_ram: [[u8; 0x1FFF]; 8],
+    w_ram_bank: u8,
     ime: bool,
 }
 
@@ -403,6 +407,11 @@ impl Cpu {
             Instruction::DisableInterrupts => self.ime = false,
             Instruction::LoadAccumulator(target, source) => self.load_accumulator(target, source),
             Instruction::Increment(target) => self.increment(target),
+            Instruction::Call(condition) => self.call(condition),
+            Instruction::Subtract(source) => self.sub(source),
+            Instruction::Nop => (),
+            Instruction::Push(target) => self.push(target),
+            Instruction::RotateLeft(source) => self.rotate_Left(source),
             _ => panic!("unimplemented instruction: {}", self.instruction),
         }
     }
@@ -418,6 +427,10 @@ impl Cpu {
             stack_pointer: 0,
             register: Register::new(),
             boot_off: false,
+            v_ram: [[0; 0x1fff]; 2],
+            v_ram_bank: 0,
+            w_ram: [[0; 0x1fff]; 8],
+            w_ram_bank: 1,
             boot_rom: [
                 0x31, 0xfe, 0xff, 0xaf, 0x21, 0xff, 0x9f, 0x32, 0xcb, 0x7c, 0x20, 0xfb, 0x21, 0x26,
                 0xff, 0x0e, 0x11, 0x3e, 0x80, 0x32, 0xe2, 0x0c, 0x3e, 0xf3, 0xe2, 0x32, 0x3e, 0x77,
@@ -918,25 +931,29 @@ impl Cpu {
         }
     }
 
+    fn rotate_left(&mut self, source: BitwiseSource) {}
+
     fn write(&self, addr: &u16, value: u8) {
         println!("writing {:#x} to {:#x}", value, addr);
     }
 
     fn read(&self, addr: &u16) -> u8 {
         return match addr {
-            0x0000..=0x00ff => {
-                if !self.boot_off {
-                    self.boot_rom[*addr as usize]
-                } else {
-                    self.cart
-                        .read(addr)
-                        .expect("failed to read from cart: {addr}")
-                }
-            }
-            0x0100..=0x7fff => self
+            0x0000..=0x00ff if !self.boot_off => self.boot_rom[*addr as usize],
+            0x0000..=0x7fff | 0xA000..=0xBfff => self
                 .cart
                 .read(addr)
                 .expect("failed to read from cart: {addr}"),
+            0x8000..=0x9fff => self.v_ram[self.v_ram_bank as usize][(addr - 0x8000) as usize],
+            0xC000..=0xCfff => self.w_ram[0][(addr - 0xC000) as usize],
+            0xd000..=0xdfff => self.w_ram[self.w_ram_bank as usize][(addr - 0xd000) as usize],
+            0xe000..=0xefff => self.w_ram[0][(addr - 0xe000) as usize],
+            0xf000..=0xfdff => self.w_ram[self.w_ram_bank as usize][(addr - 0xf000) as usize],
+            0xfea0..=0xfeff => {
+                println!("accessing unusable memory: {}", addr);
+                0xff
+            }
+
             _ => panic!("unimplemented read at location: {:#x}", addr),
         };
     }
@@ -951,7 +968,7 @@ impl Cpu {
         }
 
         let condition = match condition {
-            JumpCondition::None => false,
+            JumpCondition::None => unreachable!(),
             JumpCondition::Z => self.get_flag(Flag::Z),
             JumpCondition::C => self.get_flag(Flag::C),
             JumpCondition::NZ => !self.get_flag(Flag::Z),
@@ -964,6 +981,63 @@ impl Cpu {
         } else {
             self.program_counter += 1;
         }
+    }
+
+    fn call(&mut self, condition: JumpCondition) {
+        if condition == JumpCondition::None {
+            let addr = self.read(&self.program_counter) as u16;
+            self.program_counter += 1;
+            let addr = addr | (self.read(&self.program_counter) as u16) << 8;
+            self.program_counter += 1;
+
+            self.stack_pointer -= 1;
+            self.write(&self.stack_pointer, (self.program_counter >> 8) as u8);
+            self.stack_pointer -= 1;
+            self.write(&self.stack_pointer, self.program_counter as u8);
+
+            self.program_counter = addr;
+            return;
+        }
+
+        let condition = match condition {
+            JumpCondition::None => unreachable!(),
+            JumpCondition::Z => self.get_flag(Flag::Z),
+            JumpCondition::C => self.get_flag(Flag::C),
+            JumpCondition::NZ => !self.get_flag(Flag::Z),
+            JumpCondition::NC => !self.get_flag(Flag::C),
+        };
+
+        if condition {
+            self.instruction = Instruction::Call(JumpCondition::None);
+            self.step_count = 3;
+        } else {
+            self.program_counter += 3;
+        }
+    }
+
+    fn sub(&mut self, source: SubtractSource) {
+        let source = match source {
+            SubtractSource::A => self.register.get_a(),
+            SubtractSource::B => self.register.get_b(),
+            SubtractSource::C => self.register.get_c(),
+            SubtractSource::D => self.register.get_d(),
+            SubtractSource::E => self.register.get_e(),
+            SubtractSource::H => self.register.get_h(),
+            SubtractSource::L => self.register.get_l(),
+            SubtractSource::PC => {
+                let n = self.read(&self.program_counter);
+                self.program_counter += 1;
+                n
+            }
+            SubtractSource::HLAddr => self.read(&self.register.get_hl()),
+        };
+        let (result, c, h) = Cpu::subtract(&self.register.get_a(), &source);
+
+        self.register.set_a(result);
+        self.update_flag(Flag::C, c);
+        self.update_flag(Flag::H, h);
+        self.set_flag(Flag::N);
+        self.update_flag(Flag::Z, result == 0);
     }
 
     fn bit(&mut self, bit: u8, source: BitwiseSource) {
@@ -1000,7 +1074,7 @@ impl Cpu {
             }
         };
 
-        let (result, c, h) = Cpu::sub(&self.register.get_a(), &value);
+        let (result, c, h) = Cpu::subtract(&self.register.get_a(), &value);
         println!(
             "Comparing: {} - {} = {}",
             self.register.get_a(),
@@ -1135,54 +1209,60 @@ impl Cpu {
 
     fn increment(&mut self, target: IncrementTarget) {
         match target {
-            IncrementTarget::BC => todo!(),
-            IncrementTarget::DE => todo!(),
+            IncrementTarget::BC => {
+                let (result, _) = self.register.get_bc().overflowing_add(1);
+                self.register.set_bc(result);
+            }
+            IncrementTarget::DE => {
+                let (result, _) = self.register.get_de().overflowing_add(1);
+                self.register.set_de(result);
+            }
             IncrementTarget::HL => todo!(),
             IncrementTarget::SP => todo!(),
             IncrementTarget::B => {
-                let (results, _, h) = Cpu::add(&self.register.get_b(), &1);
+                let (results, _, h) = Cpu::addition(&self.register.get_b(), &1);
                 self.register.set_b(results);
                 self.update_flag(Flag::Z, results == 0);
                 self.clear_flag(Flag::N);
                 self.update_flag(Flag::H, h);
             }
             IncrementTarget::D => {
-                let (results, _, h) = Cpu::add(&self.register.get_d(), &1);
+                let (results, _, h) = Cpu::addition(&self.register.get_d(), &1);
                 self.register.set_d(results);
                 self.update_flag(Flag::Z, results == 0);
                 self.clear_flag(Flag::N);
                 self.update_flag(Flag::H, h);
             }
             IncrementTarget::H => {
-                let (results, _, h) = Cpu::add(&self.register.get_h(), &1);
+                let (results, _, h) = Cpu::addition(&self.register.get_h(), &1);
                 self.register.set_h(results);
                 self.update_flag(Flag::Z, results == 0);
                 self.clear_flag(Flag::N);
                 self.update_flag(Flag::H, h);
             }
             IncrementTarget::C => {
-                let (results, _, h) = Cpu::add(&self.register.get_c(), &1);
+                let (results, _, h) = Cpu::addition(&self.register.get_c(), &1);
                 self.register.set_c(results);
                 self.update_flag(Flag::Z, results == 0);
                 self.clear_flag(Flag::N);
                 self.update_flag(Flag::H, h);
             }
             IncrementTarget::E => {
-                let (results, _, h) = Cpu::add(&self.register.get_e(), &1);
+                let (results, _, h) = Cpu::addition(&self.register.get_e(), &1);
                 self.register.set_e(results);
                 self.update_flag(Flag::Z, results == 0);
                 self.clear_flag(Flag::N);
                 self.update_flag(Flag::H, h);
             }
             IncrementTarget::L => {
-                let (results, _, h) = Cpu::add(&self.register.get_l(), &1);
+                let (results, _, h) = Cpu::addition(&self.register.get_l(), &1);
                 self.register.set_l(results);
                 self.update_flag(Flag::Z, results == 0);
                 self.clear_flag(Flag::N);
                 self.update_flag(Flag::H, h);
             }
             IncrementTarget::A => {
-                let (results, _, h) = Cpu::add(&self.register.get_a(), &1);
+                let (results, _, h) = Cpu::addition(&self.register.get_a(), &1);
                 self.register.set_a(results);
                 self.update_flag(Flag::Z, results == 0);
                 self.clear_flag(Flag::N);
@@ -1190,7 +1270,7 @@ impl Cpu {
             }
             IncrementTarget::HLAddr => {
                 let addr = self.register.get_hl();
-                let (results, _, h) = Cpu::add(&self.read(&addr), &1);
+                let (results, _, h) = Cpu::addition(&self.read(&addr), &1);
                 self.write(&addr, results);
                 self.update_flag(Flag::Z, results == 0);
                 self.clear_flag(Flag::N);
@@ -1225,6 +1305,19 @@ impl Cpu {
         self.register.set_f(results);
     }
 
+    fn push(&mut self, target: PushTarget) {
+        let (msb, lsb) = match target {
+            PushTarget::BC => (self.register.get_b(), self.register.get_c()),
+            PushTarget::DE => (self.register.get_d(), self.register.get_e()),
+            PushTarget::HL => (self.register.get_h(), self.register.get_l()),
+            PushTarget::AF => (self.register.get_a(), self.register.get_f()),
+        };
+        self.stack_pointer -= 1;
+        self.write(&self.stack_pointer, msb);
+        self.stack_pointer -= 1;
+        self.write(&self.stack_pointer, lsb);
+    }
+
     fn update_flag(&mut self, flag: Flag, value: bool) {
         if value {
             self.set_flag(flag);
@@ -1245,13 +1338,13 @@ impl Cpu {
         self.register.get_f() & flag as u8 == flag as u8
     }
 
-    fn add(a: &u8, b: &u8) -> (u8, bool, bool) {
+    fn addition(a: &u8, b: &u8) -> (u8, bool, bool) {
         let (results, overflow) = a.overflowing_add(*b);
 
         (results, overflow, (results ^ a ^ b) & 0x10 == 0x10)
     }
 
-    fn sub(a: &u8, b: &u8) -> (u8, bool, bool) {
+    fn subtract(a: &u8, b: &u8) -> (u8, bool, bool) {
         let (results, overflow) = a.overflowing_sub(*b);
 
         (results, overflow, (results ^ a ^ b) & 0x10 != 0x10)
