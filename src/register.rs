@@ -1,3 +1,4 @@
+#[derive(Clone, Copy)]
 pub struct Register {
     af: u16,
     bc: u16,

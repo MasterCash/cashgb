@@ -109,7 +109,7 @@ pub enum AddSource {
     H,
     L,
     PC,
-    PCSigned,
+    PCe,
     HLAddr,
 }
 
@@ -340,8 +340,18 @@ impl Display for Instruction {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CpuStatus {
     Running,
+    Halted,
     Stopped,
     Errored,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Interrupt {
+    VBlank = 1 << 0,
+    LCD = 1 << 1,
+    Timer = 1 << 2,
+    Serial = 1 << 3,
+    Joypad = 1 << 4,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -358,15 +368,17 @@ pub struct Cpu {
     program_counter: u16,
     stack_pointer: u16,
     cart: Cart,
-    boot_off: bool,
-    boot_rom: [u8; 0x100],
     step_count: u8,
     instruction: Instruction,
-    v_ram: [[u8; 0x1FFF]; 2],
+    v_ram: [[u8; 0x2000]; 2],
     v_ram_bank: u8,
-    w_ram: [[u8; 0x1FFF]; 8],
+    w_ram: [[u8; 0x2000]; 8],
     w_ram_bank: u8,
     ime: bool,
+    io_registers: [u8; 0x80],
+    h_ram: [u8; 0x80],
+    ie: u8,
+    ime_next: bool,
 }
 
 impl Cpu {
@@ -374,6 +386,14 @@ impl Cpu {
         if CpuStatus::Errored == self.status || self.status == CpuStatus::Stopped {
             return;
         }
+
+        // handle interrupts
+
+        if self.ime_next {
+            self.ime = true;
+        }
+
+        // handle instructions
         if self.step_count == 0 {
             (self.instruction, self.step_count) =
                 Cpu::get_instruction(&self.read(&self.program_counter));
@@ -385,6 +405,35 @@ impl Cpu {
         }
 
         self.process_instruction();
+    }
+
+    pub fn new(cart: Cart) -> Self {
+        let mut cpu = Self {
+            status: CpuStatus::Running,
+            ime_next: false,
+            step_count: 0,
+            ime: false,
+            h_ram: [0; 0x80],
+            ie: 0,
+            io_registers: [0; 0x80],
+            instruction: Instruction::Nop,
+            cart,
+            program_counter: 0x000,
+            stack_pointer: 0xFFFF,
+            register: Register::new(),
+            v_ram: [[0; 0x2000]; 2],
+            v_ram_bank: 0,
+            w_ram: [[0; 0x2000]; 8],
+            w_ram_bank: 1,
+        };
+
+        cpu.reset();
+        cpu
+    }
+
+    pub fn request_interrupt(&mut self, interrupt: Interrupt) {
+        let flags = self.read(&0xff0f);
+        self.write(&0xff0f, flags | interrupt as u8);
     }
 
     fn process_instruction(&mut self) {
@@ -411,48 +460,148 @@ impl Cpu {
             Instruction::Subtract(source) => self.sub(source),
             Instruction::Nop => (),
             Instruction::Push(target) => self.push(target),
-            Instruction::RotateLeft(source) => self.rotate_Left(source),
-            _ => panic!("unimplemented instruction: {}", self.instruction),
+            Instruction::RotateLeft(source) => self.rotate_left(source),
+            Instruction::Pop(target) => self.pop(target),
+            Instruction::Decrement(target) => self.decrement(target),
+            Instruction::Add(target, source) => self.add(target, source),
+            Instruction::AddCarry(source) => self.add_carry(source),
+            Instruction::And(source) => self.and(source),
+            Instruction::ComplementAccumulator => self.complement_accumulator(),
+            Instruction::ComplementCarryFlag => self.complement_carry_flag(),
+            Instruction::DecimalAdjustAccumulator => self.decimal_adjust_accumulator(),
+            Instruction::Halt => self.status = CpuStatus::Halted,
+            Instruction::Stop => {
+                self.program_counter += 1;
+                self.status = CpuStatus::Stopped;
+            }
+            Instruction::Restart(addr) => self.restart(addr),
+            Instruction::Return(condition) => self.ret(condition),
+            Instruction::JumpHL => self.jump_hl(),
+            Instruction::ReturnInterrupt => {
+                self.ret(JumpCondition::None);
+                self.ime = true;
+            }
+            Instruction::RotateLeftCircular(source) => {
+                self.rotate(source, |cpu: &mut Cpu, value: u8| {
+                    let last = value >> 7;
+                    let n = value.rotate_left(1);
+                    cpu.update_flag(Flag::C, last == 0x01);
+                    cpu.update_flag(Flag::Z, n == 0);
+                    cpu.clear_flag(Flag::H);
+                    cpu.clear_flag(Flag::N);
+                    n
+                })
+            }
+            Instruction::RotateRight(source) => self.rotate(source, |cpu: &mut Cpu, value: u8| {
+                let last = value & 0x01;
+                let mut n = value >> 1;
+                if cpu.get_flag(Flag::C) {
+                    n |= 1u8 << 7;
+                }
+                cpu.update_flag(Flag::C, last == 0x01);
+                cpu.update_flag(Flag::Z, n == 0);
+                cpu.clear_flag(Flag::H);
+                cpu.clear_flag(Flag::N);
+                n
+            }),
+            Instruction::RotateRightCircular(source) => {
+                self.rotate(source, |cpu: &mut Cpu, value: u8| {
+                    let last = value & 0x01;
+                    let n = value.rotate_right(1);
+                    cpu.update_flag(Flag::C, last == 0x01);
+                    cpu.update_flag(Flag::Z, n == 0);
+                    cpu.clear_flag(Flag::H);
+                    cpu.clear_flag(Flag::N);
+                    n
+                })
+            }
+            Instruction::SetCarryFlag => {
+                self.set_flag(Flag::C);
+                self.clear_flag(Flag::N);
+                self.clear_flag(Flag::H);
+            }
+            Instruction::ShiftLeftArithmetic(source) => {
+                self.rotate(source, |cpu: &mut Cpu, value: u8| {
+                    let last = value >> 7;
+                    let n = value << 1;
+                    cpu.update_flag(Flag::C, last == 0x01);
+                    cpu.update_flag(Flag::Z, n == 0);
+                    cpu.clear_flag(Flag::H);
+                    cpu.clear_flag(Flag::N);
+                    n
+                })
+            }
+            Instruction::ShiftRightArithmetic(source) => {
+                self.rotate(source, |cpu: &mut Cpu, value: u8| {
+                    let sign = value & 0x80;
+                    let c = value & 0x01;
+                    let n = (value >> 1) & sign;
+                    cpu.update_flag(Flag::C, c == 0x01);
+                    cpu.update_flag(Flag::Z, n == 0);
+                    cpu.clear_flag(Flag::H);
+                    cpu.clear_flag(Flag::N);
+                    n
+                })
+            }
+            Instruction::ShiftRightLogical(source) => {
+                self.rotate(source, |cpu: &mut Cpu, value: u8| {
+                    let c = value & 0x01;
+                    let n = value >> 1;
+                    cpu.update_flag(Flag::C, c == 0x01);
+                    cpu.update_flag(Flag::Z, n == 0);
+                    cpu.clear_flag(Flag::H);
+                    cpu.clear_flag(Flag::N);
+                    n
+                })
+            }
+            Instruction::SubtractCarry(source) => self.sub_carry(source),
+            Instruction::Swap(source) => self.swap(source),
+            Instruction::Or(source) => self.or(source),
+            Instruction::Jump(condition) => self.jump(condition),
         }
     }
 
-    pub fn new(cart: Cart) -> Self {
-        Self {
-            status: CpuStatus::Running,
-            step_count: 0,
-            ime: false,
-            instruction: Instruction::Nop,
-            cart,
-            program_counter: 0,
-            stack_pointer: 0,
-            register: Register::new(),
-            boot_off: false,
-            v_ram: [[0; 0x1fff]; 2],
-            v_ram_bank: 0,
-            w_ram: [[0; 0x1fff]; 8],
-            w_ram_bank: 1,
-            boot_rom: [
-                0x31, 0xfe, 0xff, 0xaf, 0x21, 0xff, 0x9f, 0x32, 0xcb, 0x7c, 0x20, 0xfb, 0x21, 0x26,
-                0xff, 0x0e, 0x11, 0x3e, 0x80, 0x32, 0xe2, 0x0c, 0x3e, 0xf3, 0xe2, 0x32, 0x3e, 0x77,
-                0x77, 0x3e, 0xfc, 0xe0, 0x47, 0x11, 0x04, 0x01, 0x21, 0x10, 0x80, 0x1a, 0xcd, 0x95,
-                0x00, 0xcd, 0x96, 0x00, 0x13, 0x7b, 0xfe, 0x34, 0x20, 0xf3, 0x11, 0xd8, 0x00, 0x06,
-                0x08, 0x1a, 0x13, 0x22, 0x23, 0x05, 0x20, 0xf9, 0x3e, 0x19, 0xea, 0x10, 0x99, 0x21,
-                0x2f, 0x99, 0x0e, 0x0c, 0x3d, 0x28, 0x08, 0x32, 0x0d, 0x20, 0xf9, 0x2e, 0x0f, 0x18,
-                0xf3, 0x67, 0x3e, 0x64, 0x57, 0xe0, 0x42, 0x3e, 0x91, 0xe0, 0x40, 0x04, 0x1e, 0x02,
-                0x0e, 0x0c, 0xf0, 0x44, 0xfe, 0x90, 0x20, 0xfa, 0x0d, 0x20, 0xf7, 0x1d, 0x20, 0xf2,
-                0x0e, 0x13, 0x24, 0x7c, 0x1e, 0x83, 0xfe, 0x62, 0x28, 0x06, 0x1e, 0xc1, 0xfe, 0x64,
-                0x20, 0x06, 0x7b, 0xe2, 0x0c, 0x3e, 0x87, 0xe2, 0xf0, 0x42, 0x90, 0xe0, 0x42, 0x15,
-                0x20, 0xd2, 0x05, 0x20, 0x4f, 0x16, 0x20, 0x18, 0xcb, 0x4f, 0x06, 0x04, 0xc5, 0xcb,
-                0x11, 0x17, 0xc1, 0xcb, 0x11, 0x17, 0x05, 0x20, 0xf5, 0x22, 0x23, 0x22, 0x23, 0xc9,
-                0xce, 0xed, 0x66, 0x66, 0xcc, 0x0d, 0x00, 0x0b, 0x03, 0x73, 0x00, 0x83, 0x00, 0x0c,
-                0x00, 0x0d, 0x00, 0x08, 0x11, 0x1f, 0x88, 0x89, 0x00, 0x0e, 0xdc, 0xcc, 0x6e, 0xe6,
-                0xdd, 0xdd, 0xd9, 0x99, 0xbb, 0xbb, 0x67, 0x63, 0x6e, 0x0e, 0xec, 0xcc, 0xdd, 0xdc,
-                0x99, 0x9f, 0xbb, 0xb9, 0x33, 0x3e, 0x3c, 0x42, 0xb9, 0xa5, 0xb9, 0xa5, 0x42, 0x3c,
-                0x21, 0x04, 0x01, 0x11, 0xa8, 0x00, 0x1a, 0x13, 0xbe, 0x20, 0xfe, 0x23, 0x7d, 0xfe,
-                0x34, 0x20, 0xf5, 0x06, 0x19, 0x78, 0x86, 0x23, 0x05, 0x20, 0xfb, 0x86, 0x20, 0xfe,
-                0x3e, 0x01, 0xe0, 0x50,
-            ],
-        }
+    fn reset(&mut self) {
+        self.status = CpuStatus::Running;
+        self.ime = false;
+        self.ime_next = false;
+        self.program_counter = 0x100;
+        self.stack_pointer = 0xfffe;
+        self.register.set_af(0x01b0);
+        self.register.set_bc(0x0013);
+        self.register.set_de(0x00d8);
+        self.register.set_hl(0x014d);
+        self.write(&0xFF05, 0x00);
+        self.write(&0xFF06, 0x00);
+        self.write(&0xFF07, 0x00);
+        self.write(&0xFF10, 0x80);
+        self.write(&0xFF11, 0xBF);
+        self.write(&0xFF12, 0xF3);
+        self.write(&0xFF14, 0xBF);
+        self.write(&0xFF16, 0x3F);
+        self.write(&0xFF17, 0x00);
+        self.write(&0xFF19, 0xBF);
+        self.write(&0xFF1A, 0x7F);
+        self.write(&0xFF1B, 0xFF);
+        self.write(&0xFF1C, 0x9F);
+        self.write(&0xFF1E, 0xBF);
+        self.write(&0xFF20, 0xFF);
+        self.write(&0xFF21, 0x00);
+        self.write(&0xFF22, 0x00);
+        self.write(&0xFF23, 0xBF);
+        self.write(&0xFF24, 0x77);
+        self.write(&0xFF25, 0xF3);
+        self.write(&0xFF26, 0xF1);
+        self.write(&0xFF40, 0x91);
+        self.write(&0xFF42, 0x00);
+        self.write(&0xFF43, 0x00);
+        self.write(&0xFF45, 0x00);
+        self.write(&0xFF47, 0xFC);
+        self.write(&0xFF48, 0xFF);
+        self.write(&0xFF49, 0xFF);
+        self.write(&0xFF4A, 0x00);
+        self.write(&0xFF4B, 0x00);
+        self.write(&0xFFFF, 0x00);
     }
 
     fn get_instruction(byte: &u8) -> (Instruction, u8) {
@@ -864,7 +1013,7 @@ impl Cpu {
             0xf7 => (Instruction::Restart(0x30), 4),
             0xc8 => (Instruction::Return(JumpCondition::Z), 2),
             0xd8 => (Instruction::Return(JumpCondition::C), 2),
-            0xe8 => (Instruction::Add(AddTarget::SP, AddSource::PCSigned), 4),
+            0xe8 => (Instruction::Add(AddTarget::SP, AddSource::E), 4),
             0xf8 => (Instruction::Load(LoadTarget::HL, LoadSource::SPE), 3),
             0xc9 => (Instruction::Return(JumpCondition::None), 4),
             0xd9 => (Instruction::ReturnInterrupt, 4),
@@ -931,15 +1080,44 @@ impl Cpu {
         }
     }
 
-    fn rotate_left(&mut self, source: BitwiseSource) {}
-
-    fn write(&self, addr: &u16, value: u8) {
+    fn write(&mut self, addr: &u16, value: u8) {
+        match addr {
+            0x0000..=0x7fff => panic!("attempting to write to cart rom"),
+            0x8000..=0x9fff => {
+                self.v_ram[(self.v_ram_bank & 1) as usize][(addr - 0x8000) as usize] = value
+            }
+            0xa000..=0xbfff => self.cart.write(addr, value),
+            0xc000..=0xcfff => {
+                self.w_ram[0][(addr - 0xc000) as usize] = value;
+            }
+            0xd000..=0xdfff => {
+                self.w_ram[self.w_ram_bank as usize][(addr - 0xd000) as usize] = value
+            }
+            0xe000..=0xfdff => panic!("attempting to write to echo ram"),
+            0xfe00..=0xfe9f => println!("writing {:#x} to {:#x} OAM", value, addr),
+            0xfea0..=0xfeff => panic!("attempting to write to unusable address"),
+            0xff00..=0xff7f => {
+                self.io_registers[(addr - 0xff00) as usize] = value;
+                if *addr == 0xff4f {
+                    self.v_ram_bank = value & 1;
+                }
+                if *addr == 0xff50 {
+                    self.status = CpuStatus::Stopped;
+                }
+                if *addr == 0xff70 {
+                    self.w_ram_bank = value;
+                }
+            }
+            0xff80..=0xfffe => {
+                self.h_ram[(addr - 0xff80) as usize] = value;
+            }
+            0xffff => self.ie = value,
+        }
         println!("writing {:#x} to {:#x}", value, addr);
     }
 
     fn read(&self, addr: &u16) -> u8 {
         return match addr {
-            0x0000..=0x00ff if !self.boot_off => self.boot_rom[*addr as usize],
             0x0000..=0x7fff | 0xA000..=0xBfff => self
                 .cart
                 .read(addr)
@@ -953,9 +1131,86 @@ impl Cpu {
                 println!("accessing unusable memory: {}", addr);
                 0xff
             }
-
-            _ => panic!("unimplemented read at location: {:#x}", addr),
+            0xff0..=0xff7f => self.io_registers[(addr - 0xff0) as usize],
+            0xff80..=0xfffe => self.h_ram[(addr - 0xff80) as usize],
+            0xffff => self.ie,
         };
+    }
+
+    fn rotate_left(&mut self, source: BitwiseSource) {
+        let c = match source {
+            BitwiseSource::B => {
+                let c = self.register.get_b() >> 7;
+                self.register.set_b(self.register.get_b() << 1);
+                c
+            }
+            BitwiseSource::C => {
+                let c = self.register.get_c() >> 7;
+                self.register.set_c(self.register.get_c() << 1);
+                c
+            }
+            BitwiseSource::D => {
+                let c = self.register.get_d() >> 7;
+                self.register.set_d(self.register.get_d() << 1);
+                c
+            }
+            BitwiseSource::E => {
+                let c = self.register.get_e() >> 7;
+                self.register.set_e(self.register.get_e() << 1);
+                c
+            }
+            BitwiseSource::H => {
+                let c = self.register.get_h() >> 7;
+                self.register.set_h(self.register.get_h() << 1);
+                c
+            }
+            BitwiseSource::L => {
+                let c = self.register.get_l() >> 7;
+                self.register.set_l(self.register.get_l() << 1);
+                c
+            }
+            BitwiseSource::A => {
+                let c = self.register.get_a() >> 7;
+                self.register.set_a(self.register.get_a() << 1);
+                c
+            }
+            BitwiseSource::HLAddr => {
+                let n = self.read(&self.register.get_hl());
+                let c = n >> 7;
+                self.write(&self.register.get_hl(), n << 1);
+                c
+            }
+        };
+
+        self.update_flag(Flag::C, c == 1);
+    }
+
+    fn pop(&mut self, target: PopTarget) {
+        let n = self.read(&self.stack_pointer) as u16;
+        self.stack_pointer += 1;
+        let n = n | (self.read(&self.stack_pointer) as u16) << 8;
+        self.stack_pointer += 1;
+
+        match target {
+            PopTarget::BC => self.register.set_bc(n),
+            PopTarget::DE => self.register.set_de(n),
+            PopTarget::HL => self.register.set_hl(n),
+            PopTarget::AF => self.register.set_af(n),
+        };
+    }
+
+    fn push(&mut self, target: PushTarget) {
+        let (msb, lsb) = match target {
+            PushTarget::BC => (self.register.get_b(), self.register.get_c()),
+            PushTarget::DE => (self.register.get_d(), self.register.get_e()),
+            PushTarget::HL => (self.register.get_h(), self.register.get_l()),
+            PushTarget::AF => (self.register.get_a(), self.register.get_f()),
+        };
+
+        self.stack_pointer -= 1;
+        self.write(&self.stack_pointer.clone(), msb);
+        self.stack_pointer -= 1;
+        self.write(&self.stack_pointer.clone(), lsb);
     }
 
     fn jump_relative(&mut self, condition: JumpCondition) {
@@ -990,12 +1245,7 @@ impl Cpu {
             let addr = addr | (self.read(&self.program_counter) as u16) << 8;
             self.program_counter += 1;
 
-            self.stack_pointer -= 1;
-            self.write(&self.stack_pointer, (self.program_counter >> 8) as u8);
-            self.stack_pointer -= 1;
-            self.write(&self.stack_pointer, self.program_counter as u8);
-
-            self.program_counter = addr;
+            self.restart(addr);
             return;
         }
 
@@ -1066,7 +1316,7 @@ impl Cpu {
             CompareSource::E => self.register.get_e(),
             CompareSource::H => self.register.get_h(),
             CompareSource::L => self.register.get_l(),
-            CompareSource::HLAddr => todo!(),
+            CompareSource::HLAddr => self.read(&self.register.get_hl()),
             CompareSource::PC => {
                 let n = self.read(&self.program_counter);
                 self.program_counter += 1;
@@ -1098,7 +1348,11 @@ impl Cpu {
                 self.read(&n) as u16
             }
             LoadSource::HL => self.register.get_hl(),
-            LoadSource::SPE => todo!(),
+            LoadSource::SPE => {
+                let e = self.read(&self.program_counter) as i8;
+                self.program_counter += 1;
+                (self.stack_pointer as i16 + e as i16) as u16
+            }
             LoadSource::BCAddr => self.read(&self.register.get_bc()) as u16,
             LoadSource::DEAddr => self.read(&self.register.get_de()) as u16,
             LoadSource::HLAddrInc => {
@@ -1217,8 +1471,14 @@ impl Cpu {
                 let (result, _) = self.register.get_de().overflowing_add(1);
                 self.register.set_de(result);
             }
-            IncrementTarget::HL => todo!(),
-            IncrementTarget::SP => todo!(),
+            IncrementTarget::HL => {
+                let (result, _) = self.register.get_hl().overflowing_add(1);
+                self.register.set_hl(result);
+            }
+            IncrementTarget::SP => {
+                let (result, _) = self.stack_pointer.overflowing_add(1);
+                self.stack_pointer = result;
+            }
             IncrementTarget::B => {
                 let (results, _, h) = Cpu::addition(&self.register.get_b(), &1);
                 self.register.set_b(results);
@@ -1305,19 +1565,6 @@ impl Cpu {
         self.register.set_f(results);
     }
 
-    fn push(&mut self, target: PushTarget) {
-        let (msb, lsb) = match target {
-            PushTarget::BC => (self.register.get_b(), self.register.get_c()),
-            PushTarget::DE => (self.register.get_d(), self.register.get_e()),
-            PushTarget::HL => (self.register.get_h(), self.register.get_l()),
-            PushTarget::AF => (self.register.get_a(), self.register.get_f()),
-        };
-        self.stack_pointer -= 1;
-        self.write(&self.stack_pointer, msb);
-        self.stack_pointer -= 1;
-        self.write(&self.stack_pointer, lsb);
-    }
-
     fn update_flag(&mut self, flag: Flag, value: bool) {
         if value {
             self.set_flag(flag);
@@ -1348,5 +1595,479 @@ impl Cpu {
         let (results, overflow) = a.overflowing_sub(*b);
 
         (results, overflow, (results ^ a ^ b) & 0x10 != 0x10)
+    }
+
+    fn decrement(&mut self, target: DecrementTarget) {
+        match target {
+            DecrementTarget::BC => {
+                let (result, _) = self.register.get_bc().overflowing_sub(1);
+                self.register.set_bc(result);
+            }
+            DecrementTarget::DE => {
+                let (result, _) = self.register.get_de().overflowing_sub(1);
+                self.register.set_de(result);
+            }
+            DecrementTarget::HL => {
+                let (result, _) = self.register.get_hl().overflowing_sub(1);
+                self.register.set_hl(result);
+            }
+            DecrementTarget::SP => {
+                let (result, _) = self.stack_pointer.overflowing_sub(1);
+                self.stack_pointer = result;
+            }
+            DecrementTarget::B => {
+                let (results, _, h) = Cpu::subtract(&self.register.get_b(), &1);
+                self.register.set_b(results);
+                self.update_flag(Flag::Z, results == 0);
+                self.set_flag(Flag::N);
+                self.update_flag(Flag::H, h);
+            }
+            DecrementTarget::D => {
+                let (results, _, h) = Cpu::subtract(&self.register.get_d(), &1);
+                self.register.set_d(results);
+                self.update_flag(Flag::Z, results == 0);
+                self.set_flag(Flag::N);
+                self.update_flag(Flag::H, h);
+            }
+            DecrementTarget::H => {
+                let (results, _, h) = Cpu::subtract(&self.register.get_h(), &1);
+                self.register.set_h(results);
+                self.update_flag(Flag::Z, results == 0);
+                self.set_flag(Flag::N);
+                self.update_flag(Flag::H, h);
+            }
+            DecrementTarget::C => {
+                let (results, _, h) = Cpu::subtract(&self.register.get_c(), &1);
+                self.register.set_c(results);
+                self.update_flag(Flag::Z, results == 0);
+                self.set_flag(Flag::N);
+                self.update_flag(Flag::H, h);
+            }
+            DecrementTarget::E => {
+                let (results, _, h) = Cpu::subtract(&self.register.get_e(), &1);
+                self.register.set_e(results);
+                self.update_flag(Flag::Z, results == 0);
+                self.set_flag(Flag::N);
+                self.update_flag(Flag::H, h);
+            }
+            DecrementTarget::L => {
+                let (results, _, h) = Cpu::subtract(&self.register.get_l(), &1);
+                self.register.set_l(results);
+                self.update_flag(Flag::Z, results == 0);
+                self.set_flag(Flag::N);
+                self.update_flag(Flag::H, h);
+            }
+            DecrementTarget::A => {
+                let (results, _, h) = Cpu::subtract(&self.register.get_a(), &1);
+                self.register.set_a(results);
+                self.update_flag(Flag::Z, results == 0);
+                self.set_flag(Flag::N);
+                self.update_flag(Flag::H, h);
+            }
+            DecrementTarget::HLAddr => {
+                let addr = self.register.get_hl();
+                let (results, _, h) = Cpu::subtract(&self.read(&addr), &1);
+                self.write(&addr, results);
+                self.update_flag(Flag::Z, results == 0);
+                self.set_flag(Flag::N);
+                self.update_flag(Flag::H, h);
+            }
+        }
+    }
+
+    fn add(&mut self, target: AddTarget, source: AddSource) {
+        let source = match source {
+            AddSource::BC => self.register.get_bc(),
+            AddSource::DE => self.register.get_de(),
+            AddSource::HL => self.register.get_hl(),
+            AddSource::SP => self.stack_pointer,
+            AddSource::A => self.register.get_a() as u16,
+            AddSource::B => self.register.get_b() as u16,
+            AddSource::C => self.register.get_c() as u16,
+            AddSource::D => self.register.get_d() as u16,
+            AddSource::E => self.register.get_e() as u16,
+            AddSource::H => self.register.get_h() as u16,
+            AddSource::L => self.register.get_l() as u16,
+            AddSource::PC | AddSource::PCe => {
+                let n = self.read(&self.program_counter);
+                self.program_counter += 1;
+                n as u16
+            }
+            AddSource::HLAddr => self.read(&self.register.get_hl()) as u16,
+        };
+
+        match target {
+            AddTarget::SP => {
+                let n = source as i8;
+                let (result, _) = self.stack_pointer.overflowing_add_signed(n as i16);
+                self.update_flag(
+                    Flag::H,
+                    (result as i16 ^ self.stack_pointer as i16 ^ n as i16) & 0x10 == 0x10,
+                );
+                self.update_flag(
+                    Flag::C,
+                    (result as i16 ^ self.stack_pointer as i16 ^ n as i16) & 0x100 == 0x100,
+                );
+                self.clear_flag(Flag::Z);
+                self.clear_flag(Flag::N);
+                self.stack_pointer = result;
+            }
+            AddTarget::A => {
+                let (result, c, h) = Cpu::addition(&self.register.get_a(), &(source as u8));
+                self.register.set_a(result);
+                self.update_flag(Flag::C, c);
+                self.update_flag(Flag::H, h);
+                self.update_flag(Flag::Z, result == 0);
+                self.clear_flag(Flag::N);
+            }
+            AddTarget::HL => {
+                let (result, c) = self.register.get_hl().overflowing_add(source);
+                let h = (result ^ self.register.get_hl() ^ source) & 0x1000 == 0x1000;
+                self.update_flag(Flag::C, c);
+                self.update_flag(Flag::H, h);
+                self.register.set_hl(result);
+                self.clear_flag(Flag::Z);
+                self.clear_flag(Flag::N);
+            }
+        };
+    }
+
+    fn add_carry(&mut self, source: AddCarrySource) {
+        let source = match source {
+            AddCarrySource::PC => {
+                let n = self.read(&self.program_counter);
+                self.program_counter += 1;
+                n
+            }
+            AddCarrySource::A => self.register.get_a(),
+            AddCarrySource::B => self.register.get_b(),
+            AddCarrySource::C => self.register.get_c(),
+            AddCarrySource::D => self.register.get_d(),
+            AddCarrySource::E => self.register.get_e(),
+            AddCarrySource::H => self.register.get_h(),
+            AddCarrySource::L => self.register.get_l(),
+            AddCarrySource::HLAddr => self.read(&self.register.get_hl()),
+        };
+        let source = source + self.get_flag(Flag::C) as u8;
+        let (result, c, h) = Cpu::addition(&self.register.get_a(), &source);
+        self.register.set_a(result);
+        self.update_flag(Flag::C, c);
+        self.update_flag(Flag::H, h);
+        self.update_flag(Flag::Z, result == 0);
+        self.clear_flag(Flag::N);
+    }
+
+    fn and(&mut self, source: AndSource) {
+        let source = match source {
+            AndSource::PC => {
+                let n = self.read(&self.program_counter);
+                self.program_counter += 1;
+                n
+            }
+            AndSource::A => self.register.get_a(),
+            AndSource::B => self.register.get_b(),
+            AndSource::C => self.register.get_c(),
+            AndSource::D => self.register.get_d(),
+            AndSource::E => self.register.get_e(),
+            AndSource::H => self.register.get_h(),
+            AndSource::L => self.register.get_l(),
+            AndSource::HLAddr => self.read(&self.register.get_hl()),
+        };
+
+        let results = self.register.get_a() & source;
+        self.register.set_a(results);
+
+        self.set_flag(Flag::H);
+        self.clear_flag(Flag::N);
+        self.clear_flag(Flag::C);
+        self.update_flag(Flag::Z, results == 0);
+    }
+
+    fn complement_accumulator(&mut self) {
+        self.register.set_a(!self.register.get_a());
+        self.set_flag(Flag::N);
+        self.set_flag(Flag::H);
+    }
+
+    fn complement_carry_flag(&mut self) {
+        self.update_flag(Flag::C, !self.get_flag(Flag::C));
+        self.clear_flag(Flag::N);
+        self.clear_flag(Flag::H);
+    }
+
+    fn decimal_adjust_accumulator(&mut self) {
+        let mut c = false;
+        let mut n = 0u8;
+        let a = self.register.get_a();
+        let lower = a & 0xf;
+        let upper = a >> 4;
+        let carry = self.get_flag(Flag::C);
+        let half = self.get_flag(Flag::H);
+
+        if self.get_flag(Flag::N) {
+            match upper {
+                0x0..=0x9 if (0x0..=0x9).contains(&lower) && !half && !carry => {
+                    n = 0;
+                    c = false;
+                }
+                0x0..=0x8 if (0x6..=0xf).contains(&lower) && half && !carry => {
+                    n = 0xFA;
+                    c = false;
+                }
+                0x7..=0xf if (0x0..=0x9).contains(&lower) && !half && carry => {
+                    n = 0xA0;
+                    c = true;
+                }
+                0x6..=0xf if (0x6..=0xf).contains(&lower) && half && carry => {
+                    n = 0x9a;
+                    c = true;
+                }
+                _ => (),
+            }
+        } else {
+            match lower {
+                0x0..=0x9 if (0x0..=0x9).contains(&upper) && !half && !carry => {
+                    n = 0;
+                    c = false;
+                }
+                0xa..=0xf if (0x0..=0x8).contains(&upper) && !half && !carry => {
+                    n = 0x06;
+                    c = false;
+                }
+                0x0..=0x3 if (0x0..=0x9).contains(&upper) && half && !carry => {
+                    n = 0x06;
+                    c = false;
+                }
+                0x0..=0x9 if (0xa..=0xf).contains(&upper) && !half && !carry => {
+                    n = 0x60;
+                    c = true;
+                }
+                0xa..=0xf if (0x9..=0xf).contains(&upper) && !half && !carry => {
+                    n = 0x66;
+                    c = true;
+                }
+                0x0..=0x3 if (0xa..=0xf).contains(&upper) && half && !carry => {
+                    n = 0x66;
+                    c = true;
+                }
+                0x0..=0x9 if (0x0..=0x2).contains(&upper) && !half && carry => {
+                    n = 0x60;
+                    c = true;
+                }
+                0xa..=0xf if (0x0..=0x2).contains(&upper) && !half && carry => {
+                    n = 0x66;
+                    c = true;
+                }
+                0x0..=0x3 if (0x0..=0x3).contains(&upper) && half && carry => {
+                    n = 0x66;
+                    c = true;
+                }
+                _ => (),
+            }
+        }
+        let (results, _) = self.register.get_a().overflowing_add(n);
+        self.clear_flag(Flag::H);
+        self.update_flag(Flag::C, c);
+        self.update_flag(Flag::Z, results == 0);
+        self.register.set_a(results);
+    }
+
+    fn restart(&mut self, addr: u16) {
+        self.stack_pointer -= 1;
+        self.write(
+            &self.stack_pointer.clone(),
+            (self.program_counter >> 8) as u8,
+        );
+        self.stack_pointer -= 1;
+        self.write(&self.stack_pointer.clone(), self.program_counter as u8);
+
+        self.program_counter = addr;
+    }
+
+    fn ret(&mut self, condition: JumpCondition) {
+        if condition == JumpCondition::None {
+            let n = self.read(&self.stack_pointer) as u16;
+            self.stack_pointer += 1;
+            let n = n | ((self.read(&self.stack_pointer) as u16) << 8);
+            self.stack_pointer += 1;
+            self.program_counter = n;
+        };
+
+        let condition = match condition {
+            JumpCondition::None => unreachable!(),
+            JumpCondition::Z => self.get_flag(Flag::Z),
+            JumpCondition::C => self.get_flag(Flag::C),
+            JumpCondition::NZ => !self.get_flag(Flag::Z),
+            JumpCondition::NC => !self.get_flag(Flag::C),
+        };
+
+        if condition {
+            self.instruction = Instruction::Return(JumpCondition::None);
+            self.step_count = 3;
+        }
+    }
+
+    fn jump_hl(&mut self) {
+        self.program_counter = self.register.get_hl();
+    }
+
+    fn jump(&mut self, condition: JumpCondition) {
+        if condition == JumpCondition::None {
+            let n = self.read(&self.program_counter) as u16;
+            self.program_counter += 1;
+            let n = n | ((self.read(&self.program_counter) as u16) << 8);
+            self.program_counter = n;
+        }
+
+        let condition = match condition {
+            JumpCondition::None => unreachable!(),
+            JumpCondition::Z => self.get_flag(Flag::Z),
+            JumpCondition::C => self.get_flag(Flag::C),
+            JumpCondition::NZ => !self.get_flag(Flag::Z),
+            JumpCondition::NC => !self.get_flag(Flag::C),
+        };
+
+        if condition {
+            self.instruction = Instruction::Jump(JumpCondition::None);
+            self.step_count = 1;
+        } else {
+            self.program_counter += 2;
+        }
+    }
+
+    fn rotate(&mut self, source: BitwiseSource, rotate: impl Fn(&mut Cpu, u8) -> u8) {
+        match source {
+            BitwiseSource::B => {
+                let n = rotate(self, self.register.get_b());
+                self.register.set_b(n);
+            }
+            BitwiseSource::C => {
+                let n = rotate(self, self.register.get_c());
+                self.register.set_c(n);
+            }
+            BitwiseSource::D => {
+                let n = rotate(self, self.register.get_d());
+                self.register.set_d(n);
+            }
+            BitwiseSource::E => {
+                let n = rotate(self, self.register.get_e());
+                self.register.set_e(n);
+            }
+            BitwiseSource::H => {
+                let n = rotate(self, self.register.get_h());
+                self.register.set_h(n);
+            }
+            BitwiseSource::L => {
+                let n = rotate(self, self.register.get_l());
+                self.register.set_l(n);
+            }
+            BitwiseSource::A => {
+                let n = rotate(self, self.register.get_a());
+                self.register.set_a(n);
+            }
+            BitwiseSource::HLAddr => {
+                let n = rotate(self, self.read(&self.register.get_hl()));
+                self.write(&self.register.get_hl(), n);
+            }
+        };
+    }
+
+    fn sub_carry(&mut self, source: SubtractCarrySource) {
+        let source = match source {
+            SubtractCarrySource::PC => {
+                let n = self.read(&self.program_counter);
+                self.program_counter += 1;
+                n
+            }
+            SubtractCarrySource::A => self.register.get_a(),
+            SubtractCarrySource::B => self.register.get_b(),
+            SubtractCarrySource::C => self.register.get_c(),
+            SubtractCarrySource::D => self.register.get_d(),
+            SubtractCarrySource::E => self.register.get_e(),
+            SubtractCarrySource::H => self.register.get_h(),
+            SubtractCarrySource::L => self.register.get_l(),
+            SubtractCarrySource::HLAddr => self.read(&self.register.get_hl()),
+        };
+        let source = source + self.get_flag(Flag::C) as u8;
+
+        let (result, c, h) = Cpu::subtract(&self.register.get_a(), &source);
+
+        self.register.set_a(result);
+        self.update_flag(Flag::C, c);
+        self.update_flag(Flag::H, h);
+        self.update_flag(Flag::Z, result == 0);
+        self.set_flag(Flag::N);
+    }
+
+    fn swap(&mut self, source: BitwiseSource) {
+        let swap = |cpu: &mut Cpu, value: u8| {
+            cpu.clear_flag(Flag::C);
+            cpu.clear_flag(Flag::H);
+            cpu.clear_flag(Flag::N);
+            cpu.update_flag(Flag::Z, value == 0);
+
+            let lower = value >> 4;
+            let upper = value << 4;
+            lower | upper
+        };
+        match source {
+            BitwiseSource::B => {
+                let n = swap(self, self.register.get_b());
+                self.register.set_b(n);
+            }
+            BitwiseSource::C => {
+                let n = swap(self, self.register.get_c());
+                self.register.set_c(n);
+            }
+            BitwiseSource::D => {
+                let n = swap(self, self.register.get_d());
+                self.register.set_d(n);
+            }
+            BitwiseSource::E => {
+                let n = swap(self, self.register.get_e());
+                self.register.set_e(n);
+            }
+            BitwiseSource::H => {
+                let n = swap(self, self.register.get_h());
+                self.register.set_h(n);
+            }
+            BitwiseSource::L => {
+                let n = swap(self, self.register.get_l());
+                self.register.set_l(n);
+            }
+            BitwiseSource::A => {
+                let n = swap(self, self.register.get_a());
+                self.register.set_a(n);
+            }
+            BitwiseSource::HLAddr => {
+                let n = swap(self, self.read(&self.register.get_hl()));
+                self.write(&self.register.get_hl(), n);
+            }
+        }
+    }
+
+    fn or(&mut self, source: OrSource) {
+        let source = match source {
+            OrSource::PC => {
+                let n = self.read(&self.program_counter);
+                self.program_counter += 1;
+                n
+            }
+            OrSource::A => self.register.get_a(),
+            OrSource::B => self.register.get_b(),
+            OrSource::C => self.register.get_c(),
+            OrSource::D => self.register.get_d(),
+            OrSource::E => self.register.get_e(),
+            OrSource::H => self.register.get_h(),
+            OrSource::L => self.register.get_l(),
+            OrSource::HLAddr => self.read(&self.register.get_hl()),
+        };
+
+        let n = self.register.get_a() | source;
+        self.clear_flag(Flag::C);
+        self.clear_flag(Flag::N);
+        self.clear_flag(Flag::H);
+        self.update_flag(Flag::Z, n == 0);
+        self.register.set_a(n);
     }
 }

@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum MapperType {
     None,
     MBC1,
@@ -49,114 +49,114 @@ impl CartType {
                 cart_type.battery = true;
                 cart_type.ram = true;
                 cart_type.mapper = MapperType::MBC1;
-                return Err(CartError::UnsupportedMapper);
+                return Err(CartError::UnsupportedMapper(cart_type.mapper));
             }
             0x02 => {
                 cart_type.ram = true;
                 cart_type.mapper = MapperType::MBC1;
-                return Err(CartError::UnsupportedMapper);
+                return Err(CartError::UnsupportedMapper(cart_type.mapper));
             }
             0x01 => {
                 cart_type.mapper = MapperType::MBC1;
-                return Err(CartError::UnsupportedMapper);
+                return Err(CartError::UnsupportedMapper(cart_type.mapper));
             }
             0x06 => {
                 cart_type.battery = true;
                 cart_type.mapper = MapperType::MBC2;
-                return Err(CartError::UnsupportedMapper);
+                return Err(CartError::UnsupportedMapper(cart_type.mapper));
             }
             0x05 => {
                 cart_type.mapper = MapperType::MBC2;
-                return Err(CartError::UnsupportedMapper);
+                return Err(CartError::UnsupportedMapper(cart_type.mapper));
             }
             0x09 => {
                 cart_type.battery = true;
                 cart_type.ram = true;
-                return Err(CartError::UnsupportedMapper);
+                return Err(CartError::UnsupportedMapper(cart_type.mapper));
             }
             0x08 => {
                 cart_type.ram = true;
-                return Err(CartError::UnsupportedMapper);
+                return Err(CartError::UnsupportedMapper(cart_type.mapper));
             }
             0x0D => {
                 cart_type.battery = true;
                 cart_type.ram = true;
                 cart_type.mapper = MapperType::MMM01;
-                return Err(CartError::UnsupportedMapper);
+                return Err(CartError::UnsupportedMapper(cart_type.mapper));
             }
             0x0C => {
                 cart_type.ram = true;
                 cart_type.mapper = MapperType::MMM01;
-                return Err(CartError::UnsupportedMapper);
+                return Err(CartError::UnsupportedMapper(cart_type.mapper));
             }
             0x0B => {
                 cart_type.mapper = MapperType::MMM01;
-                return Err(CartError::UnsupportedMapper);
+                return Err(CartError::UnsupportedMapper(cart_type.mapper));
             }
             0x10 => {
                 cart_type.ram = true;
                 cart_type.timer = true;
                 cart_type.battery = true;
                 cart_type.mapper = MapperType::MBC3;
-                return Err(CartError::UnsupportedMapper);
+                return Err(CartError::UnsupportedMapper(cart_type.mapper));
             }
             0x0F => {
                 cart_type.timer = true;
                 cart_type.battery = true;
                 cart_type.mapper = MapperType::MBC3;
-                return Err(CartError::UnsupportedMapper);
+                return Err(CartError::UnsupportedMapper(cart_type.mapper));
             }
             0x13 => {
                 cart_type.battery = true;
                 cart_type.ram = true;
                 cart_type.mapper = MapperType::MBC3;
-                return Err(CartError::UnsupportedMapper);
+                return Err(CartError::UnsupportedMapper(cart_type.mapper));
             }
             0x12 => {
                 cart_type.ram = true;
                 cart_type.mapper = MapperType::MBC3;
-                return Err(CartError::UnsupportedMapper);
+                return Err(CartError::UnsupportedMapper(cart_type.mapper));
             }
             0x11 => {
                 cart_type.mapper = MapperType::MBC3;
-                return Err(CartError::UnsupportedMapper);
+                return Err(CartError::UnsupportedMapper(cart_type.mapper));
             }
             0x1b => {
                 cart_type.battery = true;
                 cart_type.ram = true;
                 cart_type.mapper = MapperType::MBC5;
-                return Err(CartError::UnsupportedMapper);
+                return Err(CartError::UnsupportedMapper(cart_type.mapper));
             }
             0x1a => {
                 cart_type.ram = true;
                 cart_type.mapper = MapperType::MBC5;
-                return Err(CartError::UnsupportedMapper);
+                return Err(CartError::UnsupportedMapper(cart_type.mapper));
             }
             0x19 => {
                 cart_type.mapper = MapperType::MBC5;
-                return Err(CartError::UnsupportedMapper);
+                return Err(CartError::UnsupportedMapper(cart_type.mapper));
             }
             0x1e => {
                 cart_type.battery = true;
                 cart_type.rumble = true;
                 cart_type.ram = true;
                 cart_type.mapper = MapperType::MBC5;
-                return Err(CartError::UnsupportedMapper);
+                return Err(CartError::UnsupportedMapper(cart_type.mapper));
             }
             0x1d => {
                 cart_type.ram = true;
                 cart_type.rumble = true;
                 cart_type.mapper = MapperType::MBC5;
-                return Err(CartError::UnsupportedMapper);
+                return Err(CartError::UnsupportedMapper(cart_type.mapper));
             }
             0x1c => {
                 cart_type.rumble = true;
                 cart_type.mapper = MapperType::MBC5;
-                return Err(CartError::UnsupportedMapper);
+                return Err(CartError::UnsupportedMapper(cart_type.mapper));
             }
             0x20 => {
                 cart_type.mapper = MapperType::MBC6;
-                return Err(CartError::UnsupportedMapper);
+                return Err(CartError::UnsupportedMapper(cart_type.mapper));
             }
             0x22 => {
                 cart_type.battery = true;
@@ -164,25 +164,25 @@ impl CartType {
                 cart_type.ram = true;
                 cart_type.sensor = true;
                 cart_type.mapper = MapperType::MBC7;
-                return Err(CartError::UnsupportedMapper);
+                return Err(CartError::UnsupportedMapper(cart_type.mapper));
             }
             0xfc => {
                 cart_type.mapper = MapperType::PocketCamera;
-                return Err(CartError::UnsupportedMapper);
+                return Err(CartError::UnsupportedMapper(cart_type.mapper));
             }
             0xfd => {
                 cart_type.mapper = MapperType::BandaiTama5;
-                return Err(CartError::UnsupportedMapper);
+                return Err(CartError::UnsupportedMapper(cart_type.mapper));
             }
             0xfe => {
                 cart_type.mapper = MapperType::HuC3;
-                return Err(CartError::UnsupportedMapper);
+                return Err(CartError::UnsupportedMapper(cart_type.mapper));
             }
             0xff => {
                 cart_type.mapper = MapperType::HuC1;
                 cart_type.ram = true;
                 cart_type.battery = true;
-                return Err(CartError::UnsupportedMapper);
+                return Err(CartError::UnsupportedMapper(cart_type.mapper));
             }
             _ => return Err(CartError::InvalidCartType(code.clone())),
         };
@@ -262,7 +262,7 @@ pub enum CartError {
     InvalidRomSize(u8),
     InvalidRamSize(u8),
     InvalidCartType(u8),
-    UnsupportedMapper,
+    UnsupportedMapper(MapperType),
     InvalidLogo,
     HeaderCheckSumFailure {
         computed_checksum: u8,
@@ -396,6 +396,7 @@ impl Cart {
             _ => Err(CartError::InvalidRomSize(code.clone())),
         }
     }
+
     fn get_ram_size(code: &u8) -> Result<(u32, u8), CartError> {
         match code {
             0x00 => Ok((0, 0)),
