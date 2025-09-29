@@ -20,7 +20,7 @@ impl Register {
     }
 
     pub fn set_a(&mut self, value: u8) {
-        self.af = (self.af & 0x00fF) | (value as u16) << 8;
+        self.af = (self.af & 0x00FF) | ((value as u16) << 8);
     }
 
     pub fn get_f(&self) -> u8 {
@@ -109,5 +109,11 @@ impl Register {
 
     pub fn set_hl(&mut self, value: u16) {
         self.hl = value;
+    }
+}
+
+impl Default for Register {
+    fn default() -> Self {
+        Self::new()
     }
 }
