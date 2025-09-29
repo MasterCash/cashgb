@@ -36,7 +36,13 @@ impl Cpu {
             return;
         }
 
+        // Step PPU (assuming 4 cycles per CPU step for timing)
+        if let Some(interrupt) = self.memory.step_ppu(4) {
+            self.memory.request_interrupt(interrupt);
+        }
+
         // handle interrupts
+        self.handle_interrupts();
 
         if self.ime_next {
             self.ime = true;
@@ -290,5 +296,67 @@ impl Cpu {
         // Half-carry: set if borrow from bit 4 to bit 3 (when lower nibble of a < lower nibble of b)
         let half_carry = (a & 0xF) < (b & 0xF);
         (results, overflow, half_carry)
+    }
+
+    /// Handle pending interrupts
+    fn handle_interrupts(&mut self) {
+        if !self.ime {
+            return; // Interrupts globally disabled
+        }
+
+        let interrupt_flags = self.memory.get_interrupt_flags();
+        let interrupt_enable = self.memory.get_interrupt_enable();
+        let pending_interrupts = interrupt_flags & interrupt_enable;
+
+        if pending_interrupts == 0 {
+            return; // No pending interrupts
+        }
+
+        // Check interrupts in priority order
+        for interrupt in [Interrupt::VBlank, Interrupt::LCD, Interrupt::Timer, Interrupt::Serial, Interrupt::Joypad] {
+            if pending_interrupts & (interrupt as u8) != 0 {
+                // Handle the interrupt
+                self.handle_interrupt(interrupt);
+                break; // Only handle one interrupt per cycle
+            }
+        }
+    }
+
+    /// Handle a specific interrupt
+    fn handle_interrupt(&mut self, interrupt: Interrupt) {
+        // Disable interrupts
+        self.ime = false;
+
+        // Clear the interrupt flag
+        let mut flags = self.memory.get_interrupt_flags();
+        flags &= !(interrupt as u8);
+        self.memory.write(0xFF0F, flags);
+
+        // Push current PC to stack
+        self.stack_pointer = self.stack_pointer.wrapping_sub(2);
+        let pc_high = (self.program_counter >> 8) as u8;
+        let pc_low = (self.program_counter & 0xFF) as u8;
+        self.memory.write(self.stack_pointer + 1, pc_high);
+        self.memory.write(self.stack_pointer, pc_low);
+
+        // Jump to interrupt vector
+        self.program_counter = match interrupt {
+            Interrupt::VBlank => 0x0040,
+            Interrupt::LCD => 0x0048,
+            Interrupt::Timer => 0x0050,
+            Interrupt::Serial => 0x0058,
+            Interrupt::Joypad => 0x0060,
+        };
+
+        println!("Handling interrupt: {:?} -> {:#06X}", interrupt, self.program_counter);
+    }
+
+    /// Add methods for PPU integration
+    pub fn is_frame_ready(&self) -> bool {
+        self.memory.is_frame_ready()
+    }
+
+    pub fn get_framebuffer(&mut self) -> &[u8; 160 * 144 * 4] {
+        self.memory.get_framebuffer()
     }
 }

@@ -2,32 +2,31 @@ pub mod cart;
 pub mod mbc;
 
 use crate::cpu::instructions::{CpuStatus, Interrupt};
+use crate::ppu::Ppu;
 use cart::Cart;
 
 pub struct MemoryBus {
     cart: Cart,
-    v_ram: [[u8; 0x2000]; 2],
+    ppu: Ppu,
     v_ram_bank: u8,
     w_ram: [[u8; 0x2000]; 8],
     w_ram_bank: u8,
     io_registers: [u8; 0x80],
     h_ram: [u8; 0x80],
     ie: u8,
-    oam: [u8; 0xA0], // Object Attribute Memory
 }
 
 impl MemoryBus {
     pub fn new(cart: Cart) -> Self {
         Self {
             cart,
-            v_ram: [[0; 0x2000]; 2],
+            ppu: Ppu::new(),
             v_ram_bank: 0,
             w_ram: [[0; 0x2000]; 8],
             w_ram_bank: 1,
             io_registers: [0; 0x80],
             h_ram: [0; 0x80],
             ie: 0,
-            oam: [0; 0xA0],
         }
     }
 
@@ -39,8 +38,8 @@ impl MemoryBus {
                 .read(&addr)
                 .unwrap_or_else(|| panic!("failed to read from cart: {:#x}", addr)),
 
-            // Video RAM
-            0x8000..=0x9fff => self.v_ram[self.v_ram_bank as usize][(addr - 0x8000) as usize],
+            // Video RAM - route through PPU for timing restrictions
+            0x8000..=0x9fff => self.ppu.read_vram(addr),
 
             // Work RAM bank 0
             0xC000..=0xcfff => self.w_ram[0][(addr - 0xC000) as usize],
@@ -52,8 +51,8 @@ impl MemoryBus {
             0xe000..=0xefff => self.w_ram[0][(addr - 0xe000) as usize],
             0xf000..=0xfdff => self.w_ram[self.w_ram_bank as usize][(addr - 0xf000) as usize],
 
-            // Object Attribute Memory (OAM)
-            0xfe00..=0xfe9f => self.oam[(addr - 0xfe00) as usize],
+            // Object Attribute Memory (OAM) - route through PPU for timing restrictions
+            0xfe00..=0xfe9f => self.ppu.read_oam(addr),
 
             // Unusable memory area
             0xfea0..=0xfeff => {
@@ -62,7 +61,14 @@ impl MemoryBus {
             }
 
             // I/O registers
-            0xff00..=0xff7f => self.io_registers[(addr - 0xff00) as usize],
+            0xff00..=0xff7f => {
+                match addr {
+                    // PPU registers (0xFF40-0xFF4B)
+                    0xFF40..=0xFF4B => self.ppu.registers.read_register(addr),
+                    // Other I/O registers
+                    _ => self.io_registers[(addr - 0xff00) as usize],
+                }
+            }
 
             // High RAM
             0xff80..=0xfffe => self.h_ram[(addr - 0xff80) as usize],
@@ -83,9 +89,9 @@ impl MemoryBus {
                 );
             }
 
-            // Video RAM
+            // Video RAM - route through PPU for timing restrictions
             0x8000..=0x9fff => {
-                self.v_ram[(self.v_ram_bank & 1) as usize][(addr - 0x8000) as usize] = value;
+                self.ppu.write_vram(addr, value);
             }
 
             // Cartridge RAM
@@ -108,9 +114,9 @@ impl MemoryBus {
                 println!("attempting to write to echo RAM at {:#x}", addr);
             }
 
-            // Object Attribute Memory (OAM)
+            // Object Attribute Memory (OAM) - route through PPU for timing restrictions
             0xfe00..=0xfe9f => {
-                self.oam[(addr - 0xfe00) as usize] = value;
+                self.ppu.write_oam(addr, value);
                 println!("writing {:#x} to OAM at {:#x}", value, addr);
             }
 
@@ -121,14 +127,19 @@ impl MemoryBus {
 
             // I/O registers
             0xff00..=0xff7f => {
-                self.io_registers[(addr - 0xff00) as usize] = value;
-
-                // Handle special I/O register writes
                 match addr {
+                    // PPU registers (0xFF40-0xFF4B)
+                    0xFF40..=0xFF4B => {
+                        self.ppu.registers.write_register(addr, value);
+                    }
+                    // Special I/O register writes
                     0xff4f => self.v_ram_bank = value & 1,     // VRAM bank select
                     0xff50 => return Some(CpuStatus::Stopped), // Boot ROM disable
                     0xff70 => self.w_ram_bank = value & 0x07,  // WRAM bank select
-                    _ => {}
+                    // Other I/O registers
+                    _ => {
+                        self.io_registers[(addr - 0xff00) as usize] = value;
+                    }
                 }
             }
 
@@ -162,12 +173,24 @@ impl MemoryBus {
         self.ie
     }
 
-    // PPU-related memory access
-    pub fn get_vram(&self, bank: u8, offset: u16) -> u8 {
-        self.v_ram[(bank & 1) as usize][offset as usize]
+    // PPU integration methods
+    pub fn step_ppu(&mut self, cycles: u8) -> Option<Interrupt> {
+        self.ppu.step(cycles)
     }
 
-    pub fn get_oam(&self, offset: u8) -> u8 {
-        self.oam[offset as usize]
+    pub fn is_frame_ready(&self) -> bool {
+        self.ppu.is_frame_ready()
+    }
+
+    pub fn get_framebuffer(&mut self) -> &[u8; 160 * 144 * 4] {
+        self.ppu.get_framebuffer()
+    }
+
+    pub fn get_ppu(&self) -> &crate::ppu::Ppu {
+        &self.ppu
+    }
+
+    pub fn get_ppu_mut(&mut self) -> &mut crate::ppu::Ppu {
+        &mut self.ppu
     }
 }

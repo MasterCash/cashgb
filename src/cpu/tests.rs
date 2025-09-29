@@ -1,4 +1,7 @@
 #[cfg(test)]
+mod integration_tests;
+
+#[cfg(test)]
 mod cpu_tests {
     use crate::cpu::instructions::*;
     use crate::cpu::Cpu;

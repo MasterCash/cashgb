@@ -4,6 +4,7 @@ use memory::cart::{Cart, CartError};
 
 pub mod cpu;
 pub mod memory;
+pub mod ppu;
 
 pub fn read_cart(path: &str) -> Result<Cart, CartError> {
     let mut data: Vec<u8> = vec![];
