@@ -271,14 +271,18 @@ mod tests {
     fn test_scanline_rendering() {
         let mut ppu = create_test_ppu();
 
+        // Enable background rendering
+        ppu.registers.write_lcdc(0x81); // LCD on, background on
+
         // Test that render_scanline doesn't panic
         ppu.scanline = 50;
         ppu.render_scanline();
 
-        // Check that line buffer was filled with test pattern
+        // With empty VRAM, background should render as color 0 (after palette translation)
+        // The background palette (BGP) default is 0xFC, so color 0 maps to palette color 0
         for x in 0..160 {
-            let expected = ((50 + x as u8) % 4) as u8;
-            assert_eq!(ppu.line_buffer[x], expected);
+            let expected_bg_color = ppu.registers.get_bg_color(0); // Background tile color 0
+            assert_eq!(ppu.line_buffer[x], expected_bg_color);
         }
     }
 

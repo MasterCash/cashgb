@@ -2,6 +2,9 @@
 mod integration_tests;
 
 #[cfg(test)]
+mod comprehensive_integration_tests;
+
+#[cfg(test)]
 mod cpu_tests {
     use crate::cpu::instructions::*;
     use crate::cpu::Cpu;

@@ -4,6 +4,7 @@ pub mod mbc;
 use crate::cpu::instructions::{CpuStatus, Interrupt};
 use crate::ppu::Ppu;
 use cart::Cart;
+use log::{debug, trace, warn};
 
 pub struct MemoryBus {
     cart: Cart,
@@ -56,7 +57,7 @@ impl MemoryBus {
 
             // Unusable memory area
             0xfea0..=0xfeff => {
-                println!("accessing unusable memory: {:#x}", addr);
+                warn!("accessing unusable memory: {:#x}", addr);
                 0xff
             }
 
@@ -83,7 +84,7 @@ impl MemoryBus {
             // ROM area - should not be writable, but cartridge may handle banking
             0x0000..=0x7fff => {
                 // MBC banking writes would go here
-                println!(
+                debug!(
                     "attempting to write {:#x} to ROM address {:#x}",
                     value, addr
                 );
@@ -111,13 +112,13 @@ impl MemoryBus {
 
             // Echo RAM - should mirror work RAM writes
             0xe000..=0xfdff => {
-                println!("attempting to write to echo RAM at {:#x}", addr);
+                debug!("attempting to write to echo RAM at {:#x}", addr);
             }
 
             // Object Attribute Memory (OAM) - route through PPU for timing restrictions
             0xfe00..=0xfe9f => {
                 self.ppu.write_oam(addr, value);
-                println!("writing {:#x} to OAM at {:#x}", value, addr);
+                trace!("writing {:#x} to OAM at {:#x}", value, addr);
             }
 
             // Unusable memory area
@@ -154,7 +155,7 @@ impl MemoryBus {
             }
         }
 
-        println!("writing {:#x} to {:#x}", value, addr);
+        trace!("writing {:#x} to {:#x}", value, addr);
         None
     }
 

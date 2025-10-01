@@ -7,9 +7,21 @@ pub mod display;
 #[cfg(test)]
 mod tests;
 
+#[cfg(test)]
+mod sprite_rendering_tests;
+
+#[cfg(test)]
+mod debug_sprite_test;
+
+#[cfg(test)]
+mod debug_test_expectations;
+
 use registers::PpuRegisters;
 pub use timing::LcdMode;
 use crate::cpu::instructions::Interrupt;
+use background::BackgroundRenderer;
+use sprites::SpriteRenderer;
+use display::ColorConverter;
 
 /// Game Boy Picture Processing Unit (PPU)
 ///
@@ -46,6 +58,16 @@ pub struct Ppu {
 
     /// Internal line buffer for current scanline rendering
     line_buffer: [u8; 160],
+
+    /// Background and window renderer
+    bg_renderer: BackgroundRenderer,
+
+    /// Sprite renderer
+    sprite_renderer: SpriteRenderer,
+
+    /// Sprite rendering buffers
+    sprite_buffer: [u8; 160],
+    sprite_priority_buffer: [bool; 160],
 }
 
 impl Default for Ppu {
@@ -67,6 +89,10 @@ impl Ppu {
             framebuffer: [0; 160 * 144 * 4],
             frame_ready: false,
             line_buffer: [0; 160],
+            bg_renderer: BackgroundRenderer::new(),
+            sprite_renderer: SpriteRenderer::new(),
+            sprite_buffer: [0; 160],
+            sprite_priority_buffer: [false; 160],
         }
     }
 
@@ -81,6 +107,9 @@ impl Ppu {
         self.framebuffer.fill(0);
         self.frame_ready = false;
         self.line_buffer.fill(0);
+        self.bg_renderer.reset();
+        self.sprite_buffer.fill(0);
+        self.sprite_priority_buffer.fill(false);
     }
 
     /// Step the PPU by the given number of CPU cycles
@@ -105,6 +134,10 @@ impl Ppu {
     /// Scans OAM for sprites on current scanline
     fn handle_oam_scan(&mut self) -> Option<Interrupt> {
         if self.dots >= 80 {
+            // Perform OAM scan for sprites on this line
+            let sprite_height = if self.registers.sprite_size() { 16 } else { 8 };
+            self.sprite_renderer.scan_sprites_for_line(&self.oam, self.scanline, sprite_height);
+
             self.dots = 0;
             self.mode = LcdMode::Drawing;
             self.registers.set_mode(LcdMode::Drawing);
@@ -136,7 +169,7 @@ impl Ppu {
     fn handle_hblank(&mut self) -> Option<Interrupt> {
         if self.dots >= 204 {
             self.dots = 0;
-            self.scanline += 1;
+            self.scanline = self.scanline.wrapping_add(1);
             self.registers.set_ly(self.scanline);
 
             if self.scanline >= 144 {
@@ -174,7 +207,7 @@ impl Ppu {
     fn handle_vblank(&mut self) -> Option<Interrupt> {
         if self.dots >= 456 {
             self.dots = 0;
-            self.scanline += 1;
+            self.scanline = self.scanline.wrapping_add(1);
             self.registers.set_ly(self.scanline);
 
             if self.scanline >= 154 {
@@ -195,19 +228,57 @@ impl Ppu {
 
     /// Render the current scanline to the line buffer
     fn render_scanline(&mut self) {
-        // Clear line buffer
-        self.line_buffer.fill(0);
-
         // Only render if we're in the visible area
         if self.scanline < 144 {
-            // For now, just fill with a test pattern
-            // TODO: Implement actual tile rendering
-            for x in 0..160 {
-                self.line_buffer[x] = (self.scanline.wrapping_add(x as u8)) % 4;
-            }
+            // Clear line buffer
+            self.line_buffer.fill(0);
 
-            // Copy line to framebuffer
+            // 1. Render background layer
+            self.bg_renderer.render_background_line(
+                &self.vram,
+                &self.registers,
+                self.scanline,
+                &mut self.line_buffer,
+            );
+
+            // 2. Render window layer (on top of background)
+            self.bg_renderer.render_window_line(
+                &self.vram,
+                &self.registers,
+                self.scanline,
+                &mut self.line_buffer,
+            );
+
+            // 3. Render sprites (on top of background/window with priority)
+            self.sprite_renderer.render_sprites_line(
+                &self.vram,
+                &self.registers,
+                self.scanline,
+                &self.line_buffer, // background buffer
+                &mut self.sprite_buffer,
+                &mut self.sprite_priority_buffer,
+            );
+
+            // 4. Composite final line with sprite priority
+            self.composite_line();
+
+            // 5. Copy final line to framebuffer
             self.copy_line_to_framebuffer();
+        }
+    }
+
+    /// Composite background and sprite layers with proper priority
+    fn composite_line(&mut self) {
+        for x in 0..160 {
+            // Apply background palette to background pixels first
+            self.line_buffer[x] = self.registers.get_bg_color(self.line_buffer[x]);
+
+            // If a sprite pixel is present at this position and has priority
+            if self.sprite_priority_buffer[x] && self.sprite_buffer[x] != 0 {
+                // Sprite pixel overrides background pixel
+                // Note: sprite_buffer already contains palette-adjusted color from sprite renderer
+                self.line_buffer[x] = self.sprite_buffer[x];
+            }
         }
     }
 
@@ -219,14 +290,8 @@ impl Ppu {
             let pixel_start = line_start + (x * 4);
             let color_index = self.line_buffer[x];
 
-            // Convert Game Boy color index to RGBA
-            let (r, g, b) = match color_index {
-                0 => (155, 188, 15),   // Lightest green
-                1 => (139, 172, 15),   // Light green
-                2 => (48, 98, 48),     // Dark green
-                3 => (15, 56, 15),     // Darkest green
-                _ => (0, 0, 0),        // Black fallback
-            };
+            // Convert Game Boy color index to RGBA using color converter
+            let (r, g, b) = ColorConverter::gb_color_to_rgb(color_index);
 
             self.framebuffer[pixel_start] = r;     // Red
             self.framebuffer[pixel_start + 1] = g; // Green

@@ -8,6 +8,7 @@ mod tests;
 use crate::memory::{cart::Cart, MemoryBus};
 use instructions::*;
 use registers::Register;
+use log::{debug, trace};
 
 pub struct Cpu {
     #[cfg_attr(test, allow(dead_code))]
@@ -41,7 +42,7 @@ impl Cpu {
             self.memory.request_interrupt(interrupt);
         }
 
-        // handle interrupts
+        // handle interrupts (this can wake up from HALT)
         self.handle_interrupts();
 
         if self.ime_next {
@@ -49,11 +50,16 @@ impl Cpu {
             self.ime_next = false;
         }
 
+        // If CPU is halted and no interrupt woke it up, don't process instructions
+        if self.status == CpuStatus::Halted {
+            return;
+        }
+
         // handle instructions
         if self.step_count == 0 {
             (self.instruction, self.step_count) =
                 Instruction::get_instruction(&self.memory.read(self.program_counter));
-            self.program_counter += 1;
+            self.program_counter = self.program_counter.wrapping_add(1);
         }
         if self.step_count > 1 {
             self.step_count -= 1;
@@ -138,7 +144,7 @@ impl Cpu {
     }
 
     fn process_instruction(&mut self) {
-        println!("Executing Instruction: {}", self.instruction);
+        trace!("Executing Instruction: {}", self.instruction);
         self.step_count = 0;
         match self.instruction {
             Instruction::Compare(source) => self.compare(source),
@@ -149,11 +155,11 @@ impl Cpu {
                     Instruction::get_cb_instruction(&self.memory.read(self.program_counter));
                 self.instruction = instruction;
                 self.step_count = cycles;
-                self.program_counter += 1;
+                self.program_counter = self.program_counter.wrapping_add(1);
             }
             Instruction::Bit(bit, source) => self.bit(bit, source),
             Instruction::JumpRelative(condition) => self.jump_relative(condition),
-            Instruction::EnableInterrupts => self.ime = true,
+            Instruction::EnableInterrupts => self.ime_next = true,
             Instruction::DisableInterrupts => self.ime = false,
             Instruction::LoadAccumulator(target, source) => self.load_accumulator(target, source),
             Instruction::Increment(target) => self.increment(target),
@@ -172,7 +178,7 @@ impl Cpu {
             Instruction::DecimalAdjustAccumulator => self.decimal_adjust_accumulator(),
             Instruction::Halt => self.status = CpuStatus::Halted,
             Instruction::Stop => {
-                self.program_counter += 1;
+                self.program_counter = self.program_counter.wrapping_add(1);
                 self.status = CpuStatus::Stopped;
             }
             Instruction::Restart(addr) => self.restart(addr),
@@ -300,13 +306,19 @@ impl Cpu {
 
     /// Handle pending interrupts
     fn handle_interrupts(&mut self) {
-        if !self.ime {
-            return; // Interrupts globally disabled
-        }
-
         let interrupt_flags = self.memory.get_interrupt_flags();
         let interrupt_enable = self.memory.get_interrupt_enable();
         let pending_interrupts = interrupt_flags & interrupt_enable;
+
+        // Wake up from HALT if there are pending interrupts (regardless of IME)
+        if pending_interrupts != 0 && self.status == CpuStatus::Halted {
+            self.status = CpuStatus::Running;
+            debug!("CPU woken from HALT due to pending interrupt: {:#02X}", pending_interrupts);
+        }
+
+        if !self.ime {
+            return; // Interrupts globally disabled, but CPU is still awake
+        }
 
         if pending_interrupts == 0 {
             return; // No pending interrupts
@@ -332,11 +344,12 @@ impl Cpu {
         flags &= !(interrupt as u8);
         self.memory.write(0xFF0F, flags);
 
-        // Push current PC to stack
-        self.stack_pointer = self.stack_pointer.wrapping_sub(2);
+        // Push current PC to stack (high byte first at higher address)
+        self.stack_pointer = self.stack_pointer.wrapping_sub(1);
         let pc_high = (self.program_counter >> 8) as u8;
+        self.memory.write(self.stack_pointer, pc_high);
+        self.stack_pointer = self.stack_pointer.wrapping_sub(1);
         let pc_low = (self.program_counter & 0xFF) as u8;
-        self.memory.write(self.stack_pointer + 1, pc_high);
         self.memory.write(self.stack_pointer, pc_low);
 
         // Jump to interrupt vector
@@ -348,7 +361,7 @@ impl Cpu {
             Interrupt::Joypad => 0x0060,
         };
 
-        println!("Handling interrupt: {:?} -> {:#06X}", interrupt, self.program_counter);
+        debug!("Handling interrupt: {:?} -> {:#06X}", interrupt, self.program_counter);
     }
 
     /// Add methods for PPU integration
@@ -358,5 +371,47 @@ impl Cpu {
 
     pub fn get_framebuffer(&mut self) -> &[u8; 160 * 144 * 4] {
         self.memory.get_framebuffer()
+    }
+
+    /// Debug methods for GUI access
+    pub fn get_pc(&self) -> u16 {
+        self.program_counter
+    }
+
+    pub fn get_sp(&self) -> u16 {
+        self.stack_pointer
+    }
+
+    pub fn get_af(&self) -> u16 {
+        self.register.get_af()
+    }
+
+    pub fn get_bc(&self) -> u16 {
+        self.register.get_bc()
+    }
+
+    pub fn get_de(&self) -> u16 {
+        self.register.get_de()
+    }
+
+    pub fn get_hl(&self) -> u16 {
+        self.register.get_hl()
+    }
+
+    pub fn get_current_instruction(&self) -> &Instruction {
+        &self.instruction
+    }
+
+    pub fn read_memory(&self, addr: u16) -> u8 {
+        self.memory.read(addr)
+    }
+
+    pub fn get_flags(&self) -> (bool, bool, bool, bool) {
+        (
+            self.get_flag(Flag::Z),
+            self.get_flag(Flag::N),
+            self.get_flag(Flag::H),
+            self.get_flag(Flag::C),
+        )
     }
 }

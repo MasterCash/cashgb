@@ -2,6 +2,13 @@
 ///
 /// Provides a trait-based interface for different display backends
 /// and color conversion utilities
+
+use log::debug;
+use crate::cpu::{Cpu, instructions::Instruction};
+use eframe::egui;
+use std::sync::{Arc, Mutex};
+use std::collections::VecDeque;
+
 /// Display trait for different output backends
 pub trait Display {
     /// Present a completed frame to the display
@@ -166,7 +173,7 @@ impl Display for DebugDisplay {
 
         let avg_brightness = total_brightness / (160 * 144);
 
-        println!(
+        debug!(
             "Frame {}: Avg brightness: {}, Colors: [{}]",
             self.frame_count,
             avg_brightness,
@@ -272,5 +279,274 @@ mod tests {
         // Test ASCII conversion
         assert_eq!(display.pixel_to_ascii(0, 0, 0), '█');
         assert_eq!(display.pixel_to_ascii(255, 255, 255), '░');
+    }
+}
+
+/// GUI Display using egui for multiple debugging windows
+pub struct GuiDisplay {
+    framebuffer: [u8; 160 * 144 * 4],
+    cpu_state: Arc<Mutex<CpuDebugState>>,
+    frame_count: u64,
+}
+
+#[derive(Clone)]
+pub struct CpuDebugState {
+    pub pc: u16,
+    pub sp: u16,
+    pub af: u16,
+    pub bc: u16,
+    pub de: u16,
+    pub hl: u16,
+    pub flags: (bool, bool, bool, bool), // Z, N, H, C
+    pub current_instruction: String,
+    pub instruction_history: VecDeque<String>,
+    pub memory: [u8; 0x10000], // Full memory space
+}
+
+impl Default for CpuDebugState {
+    fn default() -> Self {
+        Self {
+            pc: 0,
+            sp: 0,
+            af: 0,
+            bc: 0,
+            de: 0,
+            hl: 0,
+            flags: (false, false, false, false),
+            current_instruction: "NOP".to_string(),
+            instruction_history: VecDeque::with_capacity(100),
+            memory: [0; 0x10000],
+        }
+    }
+}
+
+impl GuiDisplay {
+    pub fn new() -> Self {
+        Self {
+            framebuffer: [0; 160 * 144 * 4],
+            cpu_state: Arc::new(Mutex::new(CpuDebugState::default())),
+            frame_count: 0,
+        }
+    }
+
+    pub fn update_cpu_state(&mut self, cpu: &Cpu) {
+        if let Ok(mut state) = self.cpu_state.lock() {
+            state.pc = cpu.get_pc();
+            state.sp = cpu.get_sp();
+            state.af = cpu.get_af();
+            state.bc = cpu.get_bc();
+            state.de = cpu.get_de();
+            state.hl = cpu.get_hl();
+            state.flags = cpu.get_flags();
+
+            let instruction_str = format!("{:?}", cpu.get_current_instruction());
+            state.current_instruction = instruction_str.clone();
+
+            // Add to history and keep only last 100 instructions
+            state.instruction_history.push_back(format!("{:04X}: {}", state.pc, instruction_str));
+            if state.instruction_history.len() > 100 {
+                state.instruction_history.pop_front();
+            }
+
+            // Copy relevant memory regions for debugging
+            for addr in 0..0x10000 {
+                state.memory[addr] = cpu.read_memory(addr as u16);
+            }
+        }
+    }
+
+    pub fn get_cpu_state(&self) -> Arc<Mutex<CpuDebugState>> {
+        Arc::clone(&self.cpu_state)
+    }
+}
+
+impl Display for GuiDisplay {
+    fn present_frame(&mut self, framebuffer: &[u8; 160 * 144 * 4]) {
+        self.framebuffer.copy_from_slice(framebuffer);
+        self.frame_count += 1;
+    }
+
+    fn name(&self) -> &str {
+        "GUI Display"
+    }
+}
+
+/// Main GUI application structure
+pub struct EmulatorApp {
+    cpu_state: Arc<Mutex<CpuDebugState>>,
+    framebuffer: [u8; 160 * 144 * 4],
+    texture: Option<egui::TextureHandle>,
+    show_memory_viewer: bool,
+    show_cpu_debugger: bool,
+    memory_address: u16,
+    memory_view_start: u16,
+}
+
+impl EmulatorApp {
+    pub fn new(cpu_state: Arc<Mutex<CpuDebugState>>) -> Self {
+        Self {
+            cpu_state,
+            framebuffer: [0; 160 * 144 * 4],
+            texture: None,
+            show_memory_viewer: true,
+            show_cpu_debugger: true,
+            memory_address: 0,
+            memory_view_start: 0,
+        }
+    }
+
+    pub fn update_framebuffer(&mut self, framebuffer: &[u8; 160 * 144 * 4]) {
+        self.framebuffer.copy_from_slice(framebuffer);
+    }
+}
+
+impl eframe::App for EmulatorApp {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Request a repaint to keep the UI responsive
+        ctx.request_repaint();
+
+        // Main game window
+        egui::Window::new("Game Boy Display")
+            .default_size([480.0, 432.0])
+            .resizable(false)
+            .show(ctx, |ui| {
+                // Convert framebuffer to egui texture
+                let color_image = egui::ColorImage::from_rgba_unmultiplied(
+                    [160, 144],
+                    &self.framebuffer,
+                );
+
+                // Create or update texture
+                let texture = self.texture.get_or_insert_with(|| {
+                    ctx.load_texture("game_display", color_image.clone(), egui::TextureOptions::NEAREST)
+                });
+
+                // Update texture data
+                texture.set(color_image, egui::TextureOptions::NEAREST);
+
+                // Display at 3x scale
+                ui.image((texture.id(), egui::vec2(480.0, 432.0)));
+            });
+
+        // CPU Debug window
+        if self.show_cpu_debugger {
+            egui::Window::new("CPU Debugger")
+                .default_size([300.0, 400.0])
+                .open(&mut self.show_cpu_debugger)
+                .show(ctx, |ui| {
+                    if let Ok(state) = self.cpu_state.lock() {
+                        ui.heading("Registers");
+                        ui.horizontal(|ui| {
+                            ui.label(format!("PC: {:04X}", state.pc));
+                            ui.label(format!("SP: {:04X}", state.sp));
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label(format!("AF: {:04X}", state.af));
+                            ui.label(format!("BC: {:04X}", state.bc));
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label(format!("DE: {:04X}", state.de));
+                            ui.label(format!("HL: {:04X}", state.hl));
+                        });
+
+                        ui.separator();
+                        ui.heading("Flags");
+                        ui.horizontal(|ui| {
+                            ui.label(format!("Z: {}", if state.flags.0 { "1" } else { "0" }));
+                            ui.label(format!("N: {}", if state.flags.1 { "1" } else { "0" }));
+                            ui.label(format!("H: {}", if state.flags.2 { "1" } else { "0" }));
+                            ui.label(format!("C: {}", if state.flags.3 { "1" } else { "0" }));
+                        });
+
+                        ui.separator();
+                        ui.heading("Current Instruction");
+                        ui.label(&state.current_instruction);
+
+                        ui.separator();
+                        ui.heading("Instruction History");
+                        egui::ScrollArea::vertical()
+                            .max_height(200.0)
+                            .show(ui, |ui| {
+                                for instruction in state.instruction_history.iter().rev().take(20) {
+                                    ui.label(instruction);
+                                }
+                            });
+                    }
+                });
+        }
+
+        // Memory Viewer window
+        if self.show_memory_viewer {
+            egui::Window::new("Memory Viewer")
+                .default_size([400.0, 500.0])
+                .open(&mut self.show_memory_viewer)
+                .show(ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label("Address:");
+                        ui.add(egui::DragValue::new(&mut self.memory_address)
+                            .range(0..=0xFFFF)
+                            .hexadecimal(4, false, true));
+                        if ui.button("Go").clicked() {
+                            self.memory_view_start = self.memory_address & 0xFFF0; // Align to 16 bytes
+                        }
+                    });
+
+                    ui.separator();
+
+                    if let Ok(state) = self.cpu_state.lock() {
+                        egui::ScrollArea::vertical().show(ui, |ui| {
+                            egui::Grid::new("memory_grid")
+                                .spacing([5.0, 2.0])
+                                .show(ui, |ui| {
+                                    // Header
+                                    ui.label("Address");
+                                    for i in 0..16 {
+                                        ui.label(format!("{:X}", i));
+                                    }
+                                    ui.label("ASCII");
+                                    ui.end_row();
+
+                                    // Memory rows
+                                    for row in 0..32 {
+                                        let base_addr = self.memory_view_start.wrapping_add(row * 16);
+                                        ui.label(format!("{:04X}", base_addr));
+
+                                        let mut ascii = String::new();
+                                        for col in 0..16 {
+                                            let addr = base_addr.wrapping_add(col);
+                                            let byte = state.memory[addr as usize];
+
+                                            // Highlight PC address
+                                            if addr == state.pc {
+                                                ui.colored_label(egui::Color32::RED, format!("{:02X}", byte));
+                                            } else {
+                                                ui.label(format!("{:02X}", byte));
+                                            }
+
+                                            // Build ASCII representation
+                                            if byte >= 32 && byte <= 126 {
+                                                ascii.push(byte as char);
+                                            } else {
+                                                ascii.push('.');
+                                            }
+                                        }
+                                        ui.label(ascii);
+                                        ui.end_row();
+                                    }
+                                });
+                        });
+                    }
+                });
+        }
+
+        // Menu bar
+        egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
+            egui::menu::bar(ui, |ui| {
+                ui.menu_button("Windows", |ui| {
+                    ui.checkbox(&mut self.show_cpu_debugger, "CPU Debugger");
+                    ui.checkbox(&mut self.show_memory_viewer, "Memory Viewer");
+                });
+            });
+        });
     }
 }

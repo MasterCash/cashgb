@@ -1,5 +1,6 @@
 use super::instructions::*;
 use super::Cpu;
+use log::trace;
 
 impl Cpu {
     // Instruction execution methods
@@ -15,13 +16,13 @@ impl Cpu {
             CompareSource::HLAddr => self.read(&self.register.get_hl()),
             CompareSource::PC => {
                 let n = self.read(&self.program_counter);
-                self.program_counter += 1;
+                self.program_counter = self.program_counter.wrapping_add(1);
                 n
             }
         };
 
         let (result, c, h) = Self::subtract(&self.register.get_a(), &value);
-        println!(
+        trace!(
             "Comparing: {} - {} = {}",
             self.register.get_a(),
             value,
@@ -37,7 +38,7 @@ impl Cpu {
         let source = match source {
             XOrSource::PC => {
                 let n = self.read(&self.program_counter);
-                self.program_counter += 1;
+                self.program_counter = self.program_counter.wrapping_add(1);
                 n
             }
             XOrSource::A => self.register.get_a(),
@@ -63,16 +64,16 @@ impl Cpu {
         let source: u16 = match source {
             LoadSource::PCAddr => {
                 let lsb = self.read(&self.program_counter);
-                self.program_counter += 1;
+                self.program_counter = self.program_counter.wrapping_add(1);
                 let msb = self.read(&self.program_counter);
-                self.program_counter += 1;
+                self.program_counter = self.program_counter.wrapping_add(1);
                 let n = ((msb as u16) << 8) | lsb as u16;
                 self.read(&n) as u16
             }
             LoadSource::HL => self.register.get_hl(),
             LoadSource::SPE => {
                 let e = self.read(&self.program_counter) as i8;
-                self.program_counter += 1;
+                self.program_counter = self.program_counter.wrapping_add(1);
                 (self.stack_pointer as i16 + e as i16) as u16
             }
             LoadSource::BCAddr => self.read(&self.register.get_bc()) as u16,
@@ -92,14 +93,14 @@ impl Cpu {
             LoadSource::SP => self.stack_pointer,
             LoadSource::PC => {
                 let n = self.read(&self.program_counter);
-                self.program_counter += 1;
+                self.program_counter = self.program_counter.wrapping_add(1);
                 n as u16
             }
             LoadSource::PC16 => {
                 let lsb = self.read(&self.program_counter);
-                self.program_counter += 1;
+                self.program_counter = self.program_counter.wrapping_add(1);
                 let msb = self.read(&self.program_counter);
-                self.program_counter += 1;
+                self.program_counter = self.program_counter.wrapping_add(1);
                 ((msb as u16) << 8) | lsb as u16
             }
             LoadSource::A => self.register.get_a() as u16,
@@ -129,30 +130,30 @@ impl Cpu {
             LoadTarget::HLAddrInc => {
                 let hl = self.register.get_hl();
                 self.write(&hl, source as u8);
-                self.register.set_hl(hl + 1);
+                self.register.set_hl(hl.wrapping_add(1));
             }
             LoadTarget::HLAddrDec => {
                 let hl = self.register.get_hl();
                 self.write(&hl, source as u8);
-                self.register.set_hl(hl - 1);
+                self.register.set_hl(hl.wrapping_sub(1));
             }
             LoadTarget::HLAddr => self.write(&self.register.get_hl(), source as u8),
             LoadTarget::PCAddr => {
                 let lsb = self.read(&self.program_counter);
-                self.program_counter += 1;
+                self.program_counter = self.program_counter.wrapping_add(1);
                 let msb = self.read(&self.program_counter);
-                self.program_counter += 1;
+                self.program_counter = self.program_counter.wrapping_add(1);
                 let n = ((msb as u16) << 8) | lsb as u16;
                 self.write(&n, source as u8);
             }
             LoadTarget::PC16Addr => {
                 let lsb = self.read(&self.program_counter);
-                self.program_counter += 1;
+                self.program_counter = self.program_counter.wrapping_add(1);
                 let msb = self.read(&self.program_counter);
-                self.program_counter += 1;
+                self.program_counter = self.program_counter.wrapping_add(1);
                 let n = ((msb as u16) << 8) | lsb as u16;
                 self.write(&n, source as u8);
-                let n = n + 1;
+                let n = n.wrapping_add(1);
                 self.write(&n, (source >> 8) as u8)
             }
         };
@@ -178,9 +179,9 @@ impl Cpu {
     pub(super) fn jump_relative(&mut self, condition: JumpCondition) {
         if condition == JumpCondition::None {
             let e = self.read(&self.program_counter) as i8;
-            self.program_counter += 1;
+            self.program_counter = self.program_counter.wrapping_add(1);
             self.program_counter = (self.program_counter as i16 + e as i16) as u16;
-            println!("jump to: {:#x}", self.program_counter);
+            trace!("jump to: {:#x}", self.program_counter);
             return;
         }
 
@@ -196,7 +197,7 @@ impl Cpu {
             self.instruction = Instruction::JumpRelative(JumpCondition::None);
             self.step_count = 1;
         } else {
-            self.program_counter += 1;
+            self.program_counter = self.program_counter.wrapping_add(1);
         }
     }
 
@@ -209,7 +210,7 @@ impl Cpu {
             LoadAccumulatorSource::A => self.register.get_a(),
             LoadAccumulatorSource::PCAddr => {
                 let n = self.read(&self.program_counter) as u16;
-                self.program_counter += 1;
+                self.program_counter = self.program_counter.wrapping_add(1);
                 self.read(&(0xFF00 | n))
             }
             LoadAccumulatorSource::CAddr => self.read(&(0xFF00 | (self.register.get_c() as u16))),
@@ -218,7 +219,7 @@ impl Cpu {
         match target {
             LoadAccumulatorTarget::PCAddr => {
                 let n = 0xFF00 | self.read(&self.program_counter) as u16;
-                self.program_counter += 1;
+                self.program_counter = self.program_counter.wrapping_add(1);
                 self.write(&n, source);
             }
             LoadAccumulatorTarget::A => self.register.set_a(source),
@@ -312,9 +313,9 @@ impl Cpu {
     pub(super) fn call(&mut self, condition: JumpCondition) {
         if condition == JumpCondition::None {
             let addr = self.read(&self.program_counter) as u16;
-            self.program_counter += 1;
+            self.program_counter = self.program_counter.wrapping_add(1);
             let addr = addr | ((self.read(&self.program_counter) as u16) << 8);
-            self.program_counter += 1;
+            self.program_counter = self.program_counter.wrapping_add(1);
 
             self.restart(addr);
             return;
@@ -332,7 +333,7 @@ impl Cpu {
             self.instruction = Instruction::Call(JumpCondition::None);
             self.step_count = 3;
         } else {
-            self.program_counter += 3;
+            self.program_counter = self.program_counter.wrapping_add(3);
         }
     }
     pub(super) fn sub(&mut self, source: SubtractSource) {
@@ -346,7 +347,7 @@ impl Cpu {
             SubtractSource::L => self.register.get_l(),
             SubtractSource::PC => {
                 let n = self.read(&self.program_counter);
-                self.program_counter += 1;
+                self.program_counter = self.program_counter.wrapping_add(1);
                 n
             }
             SubtractSource::HLAddr => self.read(&self.register.get_hl()),
@@ -367,10 +368,10 @@ impl Cpu {
             PushTarget::AF => (self.register.get_a(), self.register.get_f()),
         };
 
-        self.stack_pointer -= 1;
+        self.stack_pointer = self.stack_pointer.wrapping_sub(1);
         let sp = self.stack_pointer;
         self.write(&sp, msb);
-        self.stack_pointer -= 1;
+        self.stack_pointer = self.stack_pointer.wrapping_sub(1);
         let sp = self.stack_pointer;
         self.write(&sp, lsb);
     }
@@ -423,9 +424,9 @@ impl Cpu {
     }
     pub(super) fn pop(&mut self, target: PopTarget) {
         let n = self.read(&self.stack_pointer) as u16;
-        self.stack_pointer += 1;
+        self.stack_pointer = self.stack_pointer.wrapping_add(1);
         let n = n | ((self.read(&self.stack_pointer) as u16) << 8);
-        self.stack_pointer += 1;
+        self.stack_pointer = self.stack_pointer.wrapping_add(1);
 
         match target {
             PopTarget::BC => self.register.set_bc(n),
@@ -526,7 +527,7 @@ impl Cpu {
             AddSource::L => self.register.get_l() as u16,
             AddSource::PC | AddSource::PCe => {
                 let n = self.read(&self.program_counter);
-                self.program_counter += 1;
+                self.program_counter = self.program_counter.wrapping_add(1);
                 n as u16
             }
             AddSource::HLAddr => self.read(&self.register.get_hl()) as u16,
@@ -571,7 +572,7 @@ impl Cpu {
         let source = match source {
             AddCarrySource::PC => {
                 let n = self.read(&self.program_counter);
-                self.program_counter += 1;
+                self.program_counter = self.program_counter.wrapping_add(1);
                 n
             }
             AddCarrySource::A => self.register.get_a(),
@@ -595,7 +596,7 @@ impl Cpu {
         let source = match source {
             AndSource::PC => {
                 let n = self.read(&self.program_counter);
-                self.program_counter += 1;
+                self.program_counter = self.program_counter.wrapping_add(1);
                 n
             }
             AndSource::A => self.register.get_a(),
@@ -703,11 +704,11 @@ impl Cpu {
         self.register.set_a(results);
     }
     pub(super) fn restart(&mut self, addr: u16) {
-        self.stack_pointer -= 1;
+        self.stack_pointer = self.stack_pointer.wrapping_sub(1);
         let sp = self.stack_pointer;
         let pc_high = (self.program_counter >> 8) as u8;
         self.write(&sp, pc_high);
-        self.stack_pointer -= 1;
+        self.stack_pointer = self.stack_pointer.wrapping_sub(1);
         let sp = self.stack_pointer;
         let pc_low = self.program_counter as u8;
         self.write(&sp, pc_low);
@@ -717,9 +718,9 @@ impl Cpu {
     pub(super) fn ret(&mut self, condition: JumpCondition) {
         if condition == JumpCondition::None {
             let n = self.read(&self.stack_pointer) as u16;
-            self.stack_pointer += 1;
+            self.stack_pointer = self.stack_pointer.wrapping_add(1);
             let n = n | ((self.read(&self.stack_pointer) as u16) << 8);
-            self.stack_pointer += 1;
+            self.stack_pointer = self.stack_pointer.wrapping_add(1);
             self.program_counter = n;
             return;
         };
@@ -780,7 +781,7 @@ impl Cpu {
         let source = match source {
             SubtractCarrySource::PC => {
                 let n = self.read(&self.program_counter);
-                self.program_counter += 1;
+                self.program_counter = self.program_counter.wrapping_add(1);
                 n
             }
             SubtractCarrySource::A => self.register.get_a(),
@@ -852,7 +853,7 @@ impl Cpu {
         let source = match source {
             OrSource::PC => {
                 let n = self.read(&self.program_counter);
-                self.program_counter += 1;
+                self.program_counter = self.program_counter.wrapping_add(1);
                 n
             }
             OrSource::A => self.register.get_a(),
@@ -875,7 +876,7 @@ impl Cpu {
     pub(super) fn jump(&mut self, condition: JumpCondition) {
         if condition == JumpCondition::None {
             let n = self.read(&self.program_counter) as u16;
-            self.program_counter += 1;
+            self.program_counter = self.program_counter.wrapping_add(1);
             let n = n | ((self.read(&self.program_counter) as u16) << 8);
             self.program_counter = n;
             return;
@@ -893,7 +894,7 @@ impl Cpu {
             self.instruction = Instruction::Jump(JumpCondition::None);
             self.step_count = 1;
         } else {
-            self.program_counter += 2;
+            self.program_counter = self.program_counter.wrapping_add(2);
         }
     }
 }

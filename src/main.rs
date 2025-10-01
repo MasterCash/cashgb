@@ -1,41 +1,95 @@
 use cash_gb::{cpu::Cpu, read_cart};
-use std::env;
+use cash_gb::ppu::display::{Display, TerminalDisplay};
+use clap::Parser;
+use log::{info, LevelFilter};
+use std::time::{Duration, Instant};
+use std::thread;
+
+#[derive(Parser)]
+#[command(name = "cash-gb")]
+#[command(about = "A Game Boy emulator written in Rust")]
+struct Args {
+    /// ROM file to load
+    rom_file: String,
+
+    /// Enable trace logging (shows all debug output)
+    #[arg(long)]
+    trace: bool,
+}
 
 fn main() {
-    //let cart = match read_cart("/home/cash/dev/cash-gb/roms/dmg_test_prog_ver1.gb") {
-    //    Ok(cart) => cart,
-    //    Err(error) => panic!("error: {}", error),
-    //};
-    //println!("cart read:");
-    //println!("{}", cart);
-    //let cart = match read_cart("/home/cash/dev/cash-gb/roms/Pokemon-Crystal-USA-Europe-Rev-A.gbc") {
-    //    Ok(cart) => cart,
-    //    Err(error) => panic!("error: {}", error),
-    //};
+    let args = Args::parse();
 
-    //println!("cart read:");
-    //println!("{}", cart);
+    // Initialize logger based on trace flag
+    let log_level = if args.trace {
+        LevelFilter::Trace
+    } else {
+        LevelFilter::Info
+    };
 
-    let args: Vec<_> = env::args_os().collect();
+    env_logger::Builder::from_default_env()
+        .filter_level(log_level)
+        .init();
 
-    if args.len() == 1 {
-        panic!("missing cart file");
-    }
+    // Load the cartridge
+    let cart = match read_cart(&args.rom_file) {
+        Ok(cart) => cart,
+        Err(error) => {
+            eprintln!("Error loading ROM: {}", error);
+            std::process::exit(1);
+        }
+    };
 
-    if let Some(file) = env::args_os().nth(1) {
-        let cart = match read_cart(&match file.into_string() {
-            Ok(file) => file,
-            Err(error) => panic!("error: {:?}", error),
-        }) {
-            Ok(cart) => cart,
-            Err(error) => panic!("error: {}", error),
-        };
-        println!("cart read:");
-        println!("{}", cart);
-        let mut cpu = Cpu::new(cart);
-        let steps = 10000000;
-        for _ in 0..=steps {
+    info!("Cart loaded successfully: {}", args.rom_file);
+
+    // Create CPU and display
+    let mut cpu = Cpu::new(cart);
+    let mut display = TerminalDisplay::new(true); // Use color output
+
+    println!("Starting Game Boy emulator...");
+    println!("Press Ctrl+C to exit");
+
+    // Game loop with frame rate limiting
+    let target_fps = 60.0; // Game Boy runs at ~59.7 FPS
+    let frame_duration = Duration::from_secs_f64(1.0 / target_fps);
+    let mut last_frame_time = Instant::now();
+    let mut frame_count: u32 = 0;
+
+    let mut total_steps: usize = 0;
+    loop {
+        // Step CPU until a frame is ready
+        let mut steps_this_frame: usize = 0;
+        while !cpu.is_frame_ready() { // Max cycles per frame
             cpu.step();
+            steps_this_frame = steps_this_frame.wrapping_add(1);
+            total_steps = total_steps.wrapping_add(1);
+
+            // Debug: Check if we're stuck after frame 19
+            if frame_count >= 19 && steps_this_frame == 100000 {
+                info!("Breaking infinite loop after 100k steps - PPU appears to be stuck after frame {}", frame_count);
+                break;
+            }
+        }
+
+        // Display the frame if ready
+        if cpu.is_frame_ready() {
+            let framebuffer = cpu.get_framebuffer();
+            display.present_frame(framebuffer);
+            frame_count = frame_count.wrapping_add(1);
+            info!("Frame {} rendered after {} steps this frame, {} total steps", frame_count, steps_this_frame, total_steps);
+
+            // Frame rate limiting
+            let elapsed = last_frame_time.elapsed();
+            if elapsed < frame_duration {
+                thread::sleep(frame_duration - elapsed);
+            }
+            last_frame_time = Instant::now();
+
+            // Exit after a reasonable number of frames for demo
+            if frame_count >= 30000 { // About 5 seconds at 60 FPS
+                println!("Demo complete - {} frames rendered", frame_count);
+                break;
+            }
         }
     }
 }
