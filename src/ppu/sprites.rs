@@ -5,7 +5,6 @@
 /// - Sprite tile data from VRAM
 /// - Sprite palettes (OBP0, OBP1)
 /// - Priority and transparency handling
-
 use super::registers::PpuRegisters;
 
 /// Sprite data structure (4 bytes per sprite in OAM)
@@ -100,12 +99,7 @@ impl SpriteRenderer {
     }
 
     /// Scan OAM for sprites on the given scanline
-    pub fn scan_sprites_for_line(
-        &mut self,
-        oam: &[u8; 0xA0],
-        line: u8,
-        sprite_height: u8,
-    ) {
+    pub fn scan_sprites_for_line(&mut self, oam: &[u8; 0xA0], line: u8, sprite_height: u8) {
         self.line_sprites.clear();
 
         // Scan all 40 sprites in OAM
@@ -220,7 +214,8 @@ impl SpriteRenderer {
             };
 
             // Get pixel color from tile data
-            let color_id = self.get_sprite_pixel(params.vram, tile_index, sprite_pixel_x, sprite_row);
+            let color_id =
+                self.get_sprite_pixel(params.vram, tile_index, sprite_pixel_x, sprite_row);
 
             // Color 0 is transparent for sprites
             if color_id == 0 {
@@ -248,7 +243,9 @@ impl SpriteRenderer {
 
             if should_render {
                 // Apply sprite palette
-                let palette_color = params.registers.get_sprite_color(sprite.palette(), color_id);
+                let palette_color = params
+                    .registers
+                    .get_sprite_color(sprite.palette(), color_id);
                 params.sprite_buffer[screen_x_usize] = palette_color;
                 params.priority_buffer[screen_x_usize] = true;
             }
@@ -256,13 +253,19 @@ impl SpriteRenderer {
     }
 
     /// Get a single pixel from sprite tile data
-    fn get_sprite_pixel(&self, vram: &[u8; 0x2000], tile_index: u8, pixel_x: u8, pixel_y: u8) -> u8 {
+    fn get_sprite_pixel(
+        &self,
+        vram: &[u8; 0x2000],
+        tile_index: u8,
+        pixel_x: u8,
+        pixel_y: u8,
+    ) -> u8 {
         // Sprite tiles always use the 0x8000-0x8FFF area (unsigned mode)
         let tile_addr = (tile_index as u16) * 16;
         let row_addr = tile_addr + (pixel_y as u16) * 2;
 
         // Get the two bytes for this row
-        let byte1 = vram[row_addr as usize];       // LSB of color
+        let byte1 = vram[row_addr as usize]; // LSB of color
         let byte2 = vram[(row_addr + 1) as usize]; // MSB of color
 
         // Extract the pixel (bit 7 is leftmost pixel)
@@ -303,8 +306,8 @@ mod tests {
             attributes: 0,
         };
 
-        assert_eq!(sprite.screen_y(), 0);  // 16 - 16 = 0
-        assert_eq!(sprite.screen_x(), 0);  // 8 - 8 = 0
+        assert_eq!(sprite.screen_y(), 0); // 16 - 16 = 0
+        assert_eq!(sprite.screen_x(), 0); // 8 - 8 = 0
     }
 
     #[test]
@@ -316,10 +319,10 @@ mod tests {
             attributes: 0b11110000, // All flags set
         };
 
-        assert!(!sprite.has_priority());    // Bit 7 = 1, no priority
-        assert!(sprite.is_y_flipped());     // Bit 6 = 1
-        assert!(sprite.is_x_flipped());     // Bit 5 = 1
-        assert_eq!(sprite.palette(), 1);    // Bit 4 = 1, palette 1
+        assert!(!sprite.has_priority()); // Bit 7 = 1, no priority
+        assert!(sprite.is_y_flipped()); // Bit 6 = 1
+        assert!(sprite.is_x_flipped()); // Bit 5 = 1
+        assert_eq!(sprite.palette(), 1); // Bit 4 = 1, palette 1
     }
 
     #[test]
@@ -332,13 +335,13 @@ mod tests {
         };
 
         // 8x8 sprite
-        assert!(!sprite.is_on_line(9, 8));   // Above sprite
-        assert!(sprite.is_on_line(10, 8));   // First line of sprite
-        assert!(sprite.is_on_line(17, 8));   // Last line of sprite
-        assert!(!sprite.is_on_line(18, 8));  // Below sprite
+        assert!(!sprite.is_on_line(9, 8)); // Above sprite
+        assert!(sprite.is_on_line(10, 8)); // First line of sprite
+        assert!(sprite.is_on_line(17, 8)); // Last line of sprite
+        assert!(!sprite.is_on_line(18, 8)); // Below sprite
 
         // 8x16 sprite
-        assert!(sprite.is_on_line(25, 16));  // Last line of 8x16 sprite
+        assert!(sprite.is_on_line(25, 16)); // Last line of 8x16 sprite
         assert!(!sprite.is_on_line(26, 16)); // Below 8x16 sprite
     }
 

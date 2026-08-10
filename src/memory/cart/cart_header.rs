@@ -1,3 +1,5 @@
+use crate::memory::memory_sizes;
+
 use super::cart_types::CartError;
 
 /// Nintendo logo data for header validation
@@ -6,7 +8,44 @@ pub const NINTENDO_LOGO: [u8; 48] = [
     0x00, 0x08, 0x11, 0x1F, 0x88, 0x89, 0x00, 0x0E, 0xDC, 0xCC, 0x6E, 0xE6, 0xDD, 0xDD, 0xD9, 0x99,
     0xBB, 0xBB, 0x67, 0x63, 0x6E, 0x0E, 0xEC, 0xCC, 0xDD, 0xDC, 0x99, 0x9F, 0xBB, 0xB9, 0x33, 0x3E,
 ];
+pub mod addresses {
+    pub const ENTRY_POINT: u16 = 0x100;
+    pub const NINTENDO_LOGO_START: u16 = 0x104;
+    pub const TITLE_START: u16 = 0x134;
+    pub const TITLE_END: u16 = 0x143;
+    pub const MANUFACTURER_CODE_START: u16 = 0x13F;
+    pub const MANUFACTURER_CODE_END: u16 = 0x142;
+    pub const CGB_FLAG: u16 = 0x143;
+    pub const NEW_LICENSEE_CODE_START: u16 = 0x144;
+    pub const NEW_LICENSEE_CODE_END: u16 = 0x145;
+    pub const SGB_FLAG: u16 = 0x146;
+    pub const CARTRIDGE_TYPE: u16 = 0x147;
+    pub const ROM_SIZE: u16 = 0x148;
+    pub const RAM_SIZE: u16 = 0x149;
+    pub const DESTINATION_CODE: u16 = 0x14A;
+    pub const LICENSEE_CODE: u16 = 0x14B;
+    pub const ROM_VERSION: u16 = 0x14C;
+    pub const HEADER_CHECKSUM: u16 = 0x14D;
+}
+pub mod rom_codes {
+    pub const CODE_32_KILOBYTES: u8 = 0x00;
+    pub const CODE_64_KILOBYTES: u8 = 0x01;
+    pub const CODE_128_KILOBYTES: u8 = 0x02;
+    pub const CODE_256_KILOBYTES: u8 = 0x03;
+    pub const CODE_512_KILOBYTES: u8 = 0x04;
+    pub const CODE_1_MEGABYTES: u8 = 0x05;
+    pub const CODE_2_MEGABYTES: u8 = 0x06;
+    pub const CODE_4_MEGABYTES: u8 = 0x07;
+    pub const CODE_8_MEGABYTES: u8 = 0x08;
+}
 
+pub mod ram_codes {
+    pub const CODE_NONE: u8 = 0x00;
+    pub const CODE_8_KILOBYTES: u8 = 0x02;
+    pub const CODE_32_KILOBYTES: u8 = 0x03;
+    pub const CODE_128_KILOBYTES: u8 = 0x04;
+    pub const CODE_64_KILOBYTES: u8 = 0x05;
+}
 /// Licensee codes mapping
 const LICENSEES: &[(&str, &str)] = &[
     ("00", "None"),
@@ -74,21 +113,25 @@ const LICENSEES: &[(&str, &str)] = &[
 ];
 
 /// Parse ROM size from header byte
-pub fn get_rom_size(code: &u8) -> Result<(u32, u8), CartError> {
+/// gets the rom size and number of banks based on the rom code
+/// on error returns an InvalidRomSize
+pub fn get_rom_size(code: &u8) -> Result<(u32, u16), CartError> {
     match code {
-        0x00..=0x08 => Ok((0x8000 * (1 << code), 2u8 << code)),
+        0x00..=0x08 => Ok((0x8000 * (1 << code), 2u16 << code)),
         _ => Err(CartError::InvalidRomSize(*code)),
     }
 }
 
 /// Parse RAM size from header byte
+/// gets the ram size and number of banks based on the ram code
+/// on error returns an InvalidRamSize
 pub fn get_ram_size(code: &u8) -> Result<(u32, u8), CartError> {
-    match code {
-        0x00 => Ok((0, 0)),
-        0x02 => Ok((0x2000, 1)),
-        0x03 => Ok((0x8000, 4)),
-        0x04 => Ok((0x20000, 16)),
-        0x05 => Ok((0x10000, 8)),
+    match *code {
+        ram_codes::CODE_NONE => Ok((0, 0)),
+        ram_codes::CODE_8_KILOBYTES => Ok((memory_sizes::MEM_8_KILOBYTES, 1)),
+        ram_codes::CODE_32_KILOBYTES => Ok((memory_sizes::MEM_32_KILOBYTES, 4)),
+        ram_codes::CODE_128_KILOBYTES => Ok((memory_sizes::MEM_128_KILOBYTES, 16)),
+        ram_codes::CODE_64_KILOBYTES => Ok((memory_sizes::MEM_64_KILOBYTES, 8)),
         _ => Err(CartError::InvalidRamSize(*code)),
     }
 }

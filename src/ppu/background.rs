@@ -5,7 +5,6 @@
 /// - Tile maps from VRAM (0x9800-0x9FFF)
 /// - Scroll registers (SCX, SCY)
 /// - Window registers (WX, WY)
-
 use super::registers::PpuRegisters;
 
 pub struct BackgroundRenderer {
@@ -76,7 +75,8 @@ impl BackgroundRenderer {
             let tile_index = vram[tile_map_addr as usize];
 
             // Get tile data
-            let color_id = self.get_tile_pixel(vram, tile_index, pixel_col, pixel_row, tile_data_area);
+            let color_id =
+                self.get_tile_pixel(vram, tile_index, pixel_col, pixel_row, tile_data_area);
 
             *pixel = color_id;
         }
@@ -125,7 +125,8 @@ impl BackgroundRenderer {
             let tile_index = vram[tile_map_addr as usize];
 
             // Get tile data
-            let color_id = self.get_tile_pixel(vram, tile_index, pixel_col, pixel_row, tile_data_area);
+            let color_id =
+                self.get_tile_pixel(vram, tile_index, pixel_col, pixel_row, tile_data_area);
 
             buffer[screen_x as usize] = color_id;
         }
@@ -161,7 +162,7 @@ impl BackgroundRenderer {
         let row_addr = tile_addr + (pixel_y as u16) * 2;
 
         // Get the two bytes for this row
-        let byte1 = vram[row_addr as usize];     // LSB of color
+        let byte1 = vram[row_addr as usize]; // LSB of color
         let byte2 = vram[(row_addr + 1) as usize]; // MSB of color
 
         // Extract the pixel (bit 7 is leftmost pixel)

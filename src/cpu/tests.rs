@@ -6,9 +6,10 @@ mod comprehensive_integration_tests;
 
 #[cfg(test)]
 mod cpu_tests {
-    use crate::cpu::instructions::*;
     use crate::cpu::Cpu;
+    use crate::cpu::instructions::*;
     use crate::memory::cart::Cart;
+    use crate::memory::cart::cart_header::addresses;
 
     /// Helper function to create a simple test cart with minimal ROM
     fn create_test_cart() -> Cart {
@@ -67,7 +68,7 @@ mod cpu_tests {
         assert_eq!(cpu.register.get_hl(), 0x014d);
 
         // Test initial program counter and stack pointer
-        assert_eq!(cpu.program_counter, 0x100);
+        assert_eq!(cpu.program_counter, addresses::ENTRY_POINT);
         assert_eq!(cpu.stack_pointer, 0xfffe);
 
         // Test interrupt state
@@ -92,7 +93,7 @@ mod cpu_tests {
 
         // Verify reset state
         assert_eq!(cpu.status, CpuStatus::Running);
-        assert_eq!(cpu.program_counter, 0x100);
+        assert_eq!(cpu.program_counter, addresses::ENTRY_POINT);
         assert_eq!(cpu.stack_pointer, 0xfffe);
         assert!(!cpu.ime);
         assert!(!cpu.ime_next);

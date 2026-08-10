@@ -5,10 +5,10 @@ pub mod registers;
 #[cfg(test)]
 mod tests;
 
-use crate::memory::{cart::Cart, MemoryBus};
+use crate::memory::{MemoryBus, cart::Cart};
 use instructions::*;
-use registers::Register;
 use log::{debug, trace};
+use registers::Register;
 
 pub struct Cpu {
     #[cfg_attr(test, allow(dead_code))]
@@ -91,10 +91,12 @@ impl Cpu {
     }
 
     pub(crate) fn reset(&mut self) {
+        use crate::memory::cart::cart_header::addresses;
+
         self.status = CpuStatus::Running;
         self.ime = false;
         self.ime_next = false;
-        self.program_counter = 0x100;
+        self.program_counter = addresses::ENTRY_POINT;
         self.stack_pointer = 0xfffe;
         self.register.set_af(0x01b0);
         self.register.set_bc(0x0013);
@@ -313,7 +315,10 @@ impl Cpu {
         // Wake up from HALT if there are pending interrupts (regardless of IME)
         if pending_interrupts != 0 && self.status == CpuStatus::Halted {
             self.status = CpuStatus::Running;
-            debug!("CPU woken from HALT due to pending interrupt: {:#02X}", pending_interrupts);
+            debug!(
+                "CPU woken from HALT due to pending interrupt: {:#02X}",
+                pending_interrupts
+            );
         }
 
         if !self.ime {
@@ -325,7 +330,13 @@ impl Cpu {
         }
 
         // Check interrupts in priority order
-        for interrupt in [Interrupt::VBlank, Interrupt::LCD, Interrupt::Timer, Interrupt::Serial, Interrupt::Joypad] {
+        for interrupt in [
+            Interrupt::VBlank,
+            Interrupt::LCD,
+            Interrupt::Timer,
+            Interrupt::Serial,
+            Interrupt::Joypad,
+        ] {
             if pending_interrupts & (interrupt as u8) != 0 {
                 // Handle the interrupt
                 self.handle_interrupt(interrupt);
@@ -361,7 +372,10 @@ impl Cpu {
             Interrupt::Joypad => 0x0060,
         };
 
-        debug!("Handling interrupt: {:?} -> {:#06X}", interrupt, self.program_counter);
+        debug!(
+            "Handling interrupt: {:?} -> {:#06X}",
+            interrupt, self.program_counter
+        );
     }
 
     /// Add methods for PPU integration

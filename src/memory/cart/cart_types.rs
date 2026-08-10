@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum MapperType {
     None,
     MBC1,
@@ -16,6 +16,7 @@ pub enum MapperType {
     HuC1,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum BootFailure {
     None,
     HeaderCheckSum,
@@ -39,6 +40,8 @@ pub enum CartError {
     InvalidRomSize(u8),
     InvalidRamSize(u8),
     InvalidCartType(u8),
+    UnsupportedMapperRamSize(MapperType, u8),
+    UnsupportedMapperRomSize(MapperType, u8),
     UnsupportedMapper(MapperType),
     InvalidLogo,
     HeaderCheckSumFailure {
@@ -193,13 +196,37 @@ impl Display for CartError {
             CartError::InvalidCartType(cart_type) => write!(f, "Invalid cart type: {}", cart_type),
             CartError::UnsupportedMapper(mapper) => write!(f, "Unsupported mapper: {:?}", mapper),
             CartError::InvalidLogo => write!(f, "Invalid Nintendo logo"),
-            CartError::HeaderCheckSumFailure { computed_checksum, expected_checksum } => {
-                write!(f, "Header checksum failure: computed {}, expected {}", computed_checksum, expected_checksum)
+            CartError::HeaderCheckSumFailure {
+                computed_checksum,
+                expected_checksum,
+            } => {
+                write!(
+                    f,
+                    "Header checksum failure: computed {}, expected {}",
+                    computed_checksum, expected_checksum
+                )
             }
-            CartError::GlobalCheckSumFailure { computed_checksum, expected_checksum } => {
-                write!(f, "Global checksum failure: computed {}, expected {}", computed_checksum, expected_checksum)
+            CartError::GlobalCheckSumFailure {
+                computed_checksum,
+                expected_checksum,
+            } => {
+                write!(
+                    f,
+                    "Global checksum failure: computed {}, expected {}",
+                    computed_checksum, expected_checksum
+                )
             }
             CartError::LoadError => write!(f, "Load error"),
+            CartError::UnsupportedMapperRamSize(mapper_type, ram_code) => write!(
+                f,
+                "Unsupported ram code: {}, for Mapper: {:?}",
+                ram_code, mapper_type
+            ),
+            CartError::UnsupportedMapperRomSize(mapper_type, rom_code) => write!(
+                f,
+                "Unsupported rom code: {}, for Mapper: {:?}",
+                rom_code, mapper_type
+            ),
         }
     }
 }

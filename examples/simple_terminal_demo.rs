@@ -1,7 +1,10 @@
 /// Simple demo that creates a minimal "ROM" and shows terminal output
 use cash_gb::cpu::Cpu;
+use cash_gb::memory::cart::{
+    Cart,
+    cart_header::{NINTENDO_LOGO, addresses},
+};
 use cash_gb::ppu::display::{Display, TerminalDisplay};
-use cash_gb::memory::cart::Cart;
 use log::LevelFilter;
 
 fn main() {
@@ -15,11 +18,7 @@ fn main() {
     let mut rom_data = vec![0u8; 0x8000]; // 32KB minimum ROM
 
     // Set required Game Boy header fields
-    rom_data[0x104..0x134].copy_from_slice(&[
-        0xCE, 0xED, 0x66, 0x66, 0xCC, 0x0D, 0x00, 0x0B, 0x03, 0x73, 0x00, 0x83, 0x00, 0x0C, 0x00, 0x0D,
-        0x00, 0x08, 0x11, 0x1F, 0x88, 0x89, 0x00, 0x0E, 0xDC, 0xCC, 0x6E, 0xE6, 0xDD, 0xDD, 0xD9, 0x99,
-        0xBB, 0xBB, 0x67, 0x63, 0x6E, 0x0E, 0xEC, 0xCC, 0xDD, 0xDC, 0x99, 0x9F, 0xBB, 0xB9, 0x33, 0x3E,
-    ]); // Nintendo logo
+    rom_data[addresses::NINTENDO_LOGO_START as usize..0x134].copy_from_slice(&NINTENDO_LOGO); // Nintendo logo
 
     rom_data[0x134..0x144].copy_from_slice(b"TEST\0\0\0\0\0\0\0\0\0\0\0\0"); // Title
     rom_data[0x147] = 0x00; // Cart type: ROM only
@@ -28,8 +27,8 @@ fn main() {
 
     // Calculate header checksum
     let mut checksum: u8 = 0;
-    for i in 0x134..0x14D {
-        checksum = checksum.wrapping_sub(rom_data[i]).wrapping_sub(1);
+    for datum in rom_data.iter().take(0x14D).skip(0x134) {
+        checksum = checksum.wrapping_sub(*datum).wrapping_sub(1);
     }
     rom_data[0x14D] = checksum;
 
@@ -70,7 +69,9 @@ fn main() {
 
     if frame_count == 0 {
         println!("No frames were generated in {} steps", steps);
-        println!("This might be because the LCD is disabled or the boot ROM needs to be implemented");
+        println!(
+            "This might be because the LCD is disabled or the boot ROM needs to be implemented"
+        );
     } else {
         println!("Demo complete! Rendered {} frames", frame_count);
     }

@@ -1,13 +1,12 @@
+use crate::cpu::Cpu;
+use eframe::egui;
 /// Display output abstraction for the PPU
 ///
 /// Provides a trait-based interface for different display backends
 /// and color conversion utilities
-
 use log::debug;
-use crate::cpu::{Cpu, instructions::Instruction};
-use eframe::egui;
-use std::sync::{Arc, Mutex};
 use std::collections::VecDeque;
+use std::sync::{Arc, Mutex};
 
 /// Display trait for different output backends
 pub trait Display {
@@ -59,8 +58,8 @@ impl TerminalDisplay {
         let gray = ((r as u16 + g as u16 + b as u16) / 3) as u8;
 
         match gray {
-            0..=63 => "\x1b[48;5;232m  \x1b[0m".to_string(),   // Dark gray background
-            64..=127 => "\x1b[48;5;240m  \x1b[0m".to_string(),  // Medium gray background
+            0..=63 => "\x1b[48;5;232m  \x1b[0m".to_string(), // Dark gray background
+            64..=127 => "\x1b[48;5;240m  \x1b[0m".to_string(), // Medium gray background
             128..=191 => "\x1b[48;5;248m  \x1b[0m".to_string(), // Light gray background
             192..=255 => "\x1b[48;5;255m  \x1b[0m".to_string(), // White background
         }
@@ -198,11 +197,11 @@ impl ColorConverter {
     /// Uses the classic Game Boy green palette
     pub fn gb_color_to_rgb(color_index: u8) -> (u8, u8, u8) {
         match color_index & 0x03 {
-            0 => (155, 188, 15),  // Lightest green
-            1 => (139, 172, 15),  // Light green
-            2 => (48, 98, 48),    // Dark green
-            3 => (15, 56, 15),    // Darkest green
-            _ => (0, 0, 0),       // Should never happen
+            0 => (155, 188, 15), // Lightest green
+            1 => (139, 172, 15), // Light green
+            2 => (48, 98, 48),   // Dark green
+            3 => (15, 56, 15),   // Darkest green
+            _ => (0, 0, 0),      // Should never happen
         }
     }
 
@@ -343,7 +342,10 @@ impl GuiDisplay {
             state.current_instruction = instruction_str.clone();
 
             // Add to history and keep only last 100 instructions
-            state.instruction_history.push_back(format!("{:04X}: {}", state.pc, instruction_str));
+            let pc = state.pc;
+            state
+                .instruction_history
+                .push_back(format!("{:04X}: {}", pc, instruction_str));
             if state.instruction_history.len() > 100 {
                 state.instruction_history.pop_front();
             }
@@ -357,6 +359,12 @@ impl GuiDisplay {
 
     pub fn get_cpu_state(&self) -> Arc<Mutex<CpuDebugState>> {
         Arc::clone(&self.cpu_state)
+    }
+}
+
+impl Default for GuiDisplay {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -411,14 +419,16 @@ impl eframe::App for EmulatorApp {
             .resizable(false)
             .show(ctx, |ui| {
                 // Convert framebuffer to egui texture
-                let color_image = egui::ColorImage::from_rgba_unmultiplied(
-                    [160, 144],
-                    &self.framebuffer,
-                );
+                let color_image =
+                    egui::ColorImage::from_rgba_unmultiplied([160, 144], &self.framebuffer);
 
                 // Create or update texture
                 let texture = self.texture.get_or_insert_with(|| {
-                    ctx.load_texture("game_display", color_image.clone(), egui::TextureOptions::NEAREST)
+                    ctx.load_texture(
+                        "game_display",
+                        color_image.clone(),
+                        egui::TextureOptions::NEAREST,
+                    )
                 });
 
                 // Update texture data
@@ -483,11 +493,14 @@ impl eframe::App for EmulatorApp {
                 .show(ctx, |ui| {
                     ui.horizontal(|ui| {
                         ui.label("Address:");
-                        ui.add(egui::DragValue::new(&mut self.memory_address)
-                            .range(0..=0xFFFF)
-                            .hexadecimal(4, false, true));
+                        ui.add(
+                            egui::DragValue::new(&mut self.memory_address)
+                                .range(0..=0xFFFF)
+                                .hexadecimal(4, false, true),
+                        );
                         if ui.button("Go").clicked() {
-                            self.memory_view_start = self.memory_address & 0xFFF0; // Align to 16 bytes
+                            self.memory_view_start = self.memory_address & 0xFFF0;
+                            // Align to 16 bytes
                         }
                     });
 
@@ -508,7 +521,8 @@ impl eframe::App for EmulatorApp {
 
                                     // Memory rows
                                     for row in 0..32 {
-                                        let base_addr = self.memory_view_start.wrapping_add(row * 16);
+                                        let base_addr =
+                                            self.memory_view_start.wrapping_add(row * 16);
                                         ui.label(format!("{:04X}", base_addr));
 
                                         let mut ascii = String::new();
@@ -518,13 +532,16 @@ impl eframe::App for EmulatorApp {
 
                                             // Highlight PC address
                                             if addr == state.pc {
-                                                ui.colored_label(egui::Color32::RED, format!("{:02X}", byte));
+                                                ui.colored_label(
+                                                    egui::Color32::RED,
+                                                    format!("{:02X}", byte),
+                                                );
                                             } else {
                                                 ui.label(format!("{:02X}", byte));
                                             }
 
                                             // Build ASCII representation
-                                            if byte >= 32 && byte <= 126 {
+                                            if (32..=126).contains(&byte) {
                                                 ascii.push(byte as char);
                                             } else {
                                                 ascii.push('.');

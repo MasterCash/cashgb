@@ -1,13 +1,16 @@
-use std::fmt::Display;
+use std::fmt::{Debug, Display};
 
-use super::mbc::MemoryBankController;
+use super::controller::MemoryBankController;
 use cart_header::{
     get_licensee, get_ram_size, get_rom_size, validate_header_checksum, validate_nintendo_logo,
 };
 pub use cart_types::{BootFailure, CartError, CartType, MapperType};
 
-mod cart_header;
+pub mod cart_header;
 mod cart_types;
+
+#[cfg(test)]
+pub mod tests;
 
 pub struct Cart {
     mbc: Box<dyn MemoryBankController>,
@@ -17,7 +20,7 @@ pub struct Cart {
     licensee: String,
     sgb: bool,
     rom_size: u32,
-    rom_banks: u8,
+    rom_banks: u16,
     ram_size: u32,
     ram_banks: u8,
     destination: bool,
@@ -38,6 +41,25 @@ impl Display for Cart {
         writeln!(f, "\t destination: {}", self.destination)?;
         writeln!(f, "\t version: {}", self.version)?;
         Ok(())
+    }
+}
+
+impl Debug for Cart {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Cart")
+            .field("mbc", &self.mbc.as_ref().get_mapper_type())
+            .field("title", &self.title)
+            .field("cgb", &self.cgb)
+            .field("cart_type", &self.cart_type)
+            .field("licensee", &self.licensee)
+            .field("sgb", &self.sgb)
+            .field("rom_size", &self.rom_size)
+            .field("rom_banks", &self.rom_banks)
+            .field("ram_size", &self.ram_size)
+            .field("ram_banks", &self.ram_banks)
+            .field("destination", &self.destination)
+            .field("version", &self.version)
+            .finish()
     }
 }
 
@@ -73,7 +95,7 @@ impl Cart {
         let version = rom[0x014c];
         let licensee = get_licensee(&rom[0x014B], &rom[0x0144], &rom[0x0145]);
 
-        let mbc = super::mbc::create_mbc(cart_type.mapper, rom, ram_size, rom_banks, ram_banks)?;
+        let mbc = super::controller::create_mbc(cart_type.mapper, rom)?;
 
         Ok(Self {
             cgb,

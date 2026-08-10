@@ -1,10 +1,25 @@
 pub mod cart;
-pub mod mbc;
+pub mod controller;
+
+#[cfg(test)]
+mod tests;
 
 use crate::cpu::instructions::{CpuStatus, Interrupt};
 use crate::ppu::Ppu;
 use cart::Cart;
 use log::{debug, trace, warn};
+
+pub mod memory_sizes {
+    pub const MEM_8_KILOBYTES: u32 = 0x2000;
+    pub const MEM_16_KILOBYTES: u32 = MEM_8_KILOBYTES * 2;
+    pub const MEM_32_KILOBYTES: u32 = MEM_16_KILOBYTES * 2;
+    pub const MEM_64_KILOBYTES: u32 = MEM_32_KILOBYTES * 2;
+    pub const MEM_128_KILOBYTES: u32 = MEM_64_KILOBYTES * 2;
+    pub const MEM_256_KILOBYTES: u32 = MEM_128_KILOBYTES * 2;
+    pub const MEM_512_KILOBYTES: u32 = MEM_256_KILOBYTES * 2;
+    pub const MEM_1_MEGABYTE: u32 = MEM_512_KILOBYTES * 2;
+    pub const MEM_2_MEGABYTES: u32 = MEM_1_MEGABYTE * 2;
+}
 
 pub struct MemoryBus {
     cart: Cart,
@@ -134,9 +149,9 @@ impl MemoryBus {
                         self.ppu.registers.write_register(addr, value);
                     }
                     // Special I/O register writes
-                    0xff4f => self.v_ram_bank = value & 1,     // VRAM bank select
+                    0xff4f => self.v_ram_bank = value & 1, // VRAM bank select
                     0xff50 => return Some(CpuStatus::Stopped), // Boot ROM disable
-                    0xff70 => self.w_ram_bank = value & 0x07,  // WRAM bank select
+                    0xff70 => self.w_ram_bank = value & 0x07, // WRAM bank select
                     // Other I/O registers
                     _ => {
                         self.io_registers[(addr - 0xff00) as usize] = value;
