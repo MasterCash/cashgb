@@ -26,7 +26,7 @@ pub struct MemoryBus {
     pub(crate) cart: Cart,
     pub(crate) ppu: Ppu,
     pub(crate) v_ram_bank: u8,
-    pub(crate) w_ram: [[u8; 0x2000]; 8],
+    pub(crate) w_ram: Vec<[u8; 0x2000]>,
     pub(crate) w_ram_bank: u8,
     pub(crate) io_registers: [u8; 0x80],
     pub(crate) h_ram: [u8; 0x80],
@@ -39,7 +39,7 @@ impl MemoryBus {
             cart,
             ppu: Ppu::new(),
             v_ram_bank: 0,
-            w_ram: [[0; 0x2000]; 8],
+            w_ram: vec![[0; 0x2000]; 8],
             w_ram_bank: 1,
             io_registers: [0; 0x80],
             h_ram: [0; 0x80],
@@ -51,7 +51,7 @@ impl MemoryBus {
             cart: Cart::empty(),
             ppu: Ppu::new(),
             v_ram_bank: 0,
-            w_ram: [[0; 0x2000]; 8],
+            w_ram: vec![[0; 0x2000]; 9],
             w_ram_bank: 0,
             io_registers: [0; 0x80],
             h_ram: [0; 0x80],
@@ -211,7 +211,7 @@ impl MemoryBus {
         self.ppu.is_frame_ready()
     }
 
-    pub fn get_framebuffer(&mut self) -> &[u8; memory_sizes::MEM_BUFF_SIZE] {
+    pub fn get_framebuffer(&mut self) -> &Vec<u8> {
         self.ppu.get_framebuffer()
     }
 

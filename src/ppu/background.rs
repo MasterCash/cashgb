@@ -32,7 +32,7 @@ impl BackgroundRenderer {
     /// Render background line to the provided buffer
     pub fn render_background_line(
         &self,
-        vram: &[u8; 0x2000],
+        vram: &Vec<u8>,
         registers: &PpuRegisters,
         line: u8,
         buffer: &mut [u8; 160],
@@ -85,7 +85,7 @@ impl BackgroundRenderer {
     /// Render window line to the provided buffer
     pub fn render_window_line(
         &mut self,
-        vram: &[u8; 0x2000],
+        vram: &Vec<u8>,
         registers: &PpuRegisters,
         line: u8,
         buffer: &mut [u8; 160],
@@ -138,7 +138,7 @@ impl BackgroundRenderer {
     /// Get a single pixel from a tile
     fn get_tile_pixel(
         &self,
-        vram: &[u8; 0x2000],
+        vram: &Vec<u8>,
         tile_index: u8,
         pixel_x: u8,
         pixel_y: u8,
@@ -192,7 +192,7 @@ mod tests {
     #[test]
     fn test_get_tile_pixel() {
         let renderer = BackgroundRenderer::new();
-        let mut vram = [0; 0x2000];
+        let mut vram = vec![0; 0x2000];
 
         // Set up a test pattern where each pixel_x has a specific expected color:
         // pixel_x=7 (bit 0): color 3 (both bits set)

@@ -14,7 +14,7 @@ pub struct App {
     #[serde(skip)]
     cpu: Cpu,
     #[serde(skip)]
-    frame_buffer: [u8; memory_sizes::MEM_BUFF_SIZE],
+    frame_buffer: Vec<u8>,
 }
 
 impl Default for App {
@@ -22,7 +22,7 @@ impl Default for App {
         Self {
             scale: Default::default(),
             cpu: Cpu::empty(),
-            frame_buffer: [0; memory_sizes::MEM_BUFF_SIZE],
+            frame_buffer: vec![0; memory_sizes::MEM_BUFF_SIZE],
         }
     }
 }
@@ -32,7 +32,7 @@ impl App {
         Self {
             scale: 5.0,
             cpu: Cpu::new(cart),
-            frame_buffer: [0; memory_sizes::MEM_BUFF_SIZE],
+            frame_buffer: vec![0; memory_sizes::MEM_BUFF_SIZE],
         }
     }
 }
@@ -40,7 +40,6 @@ impl App {
 impl eframe::App for App {
     fn save(&mut self, _storage: &mut dyn eframe::Storage) {}
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        /*
         egui::Panel::top("top_panel").show(ui, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
                 ui.menu_button("File", |ui| {
@@ -181,6 +180,5 @@ impl eframe::App for App {
                 }
             }
         });
-        */
     }
 }

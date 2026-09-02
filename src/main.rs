@@ -45,18 +45,11 @@ fn main() -> eframe::Result {
     };
 
     info!("Cart loaded successfully: {}", args.rom_file);
-    std::thread::Builder::new()
-        .stack_size(8 * 1024 * 1024) // 8 MB stack
-        .spawn(|| {
-            let result = eframe::run_native(
-                "cash-gb",
-                native_options,
-                Box::new(|_| Ok(Box::new(App::new(cart)))),
-            ); // Run your eframe app here
-        })
-        .unwrap()
-        .join()
-        .unwrap();
+    eframe::run_native(
+        "cash-gb",
+        native_options,
+        Box::new(|_| Ok(Box::new(App::new(cart)))),
+    )?;
 
     /*
     // Create CPU and display

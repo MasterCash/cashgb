@@ -71,7 +71,7 @@ impl Sprite {
 
 /// Parameters for sprite rendering
 struct SpriteRenderParams<'a> {
-    vram: &'a [u8; 0x2000],
+    vram: &'a Vec<u8>,
     registers: &'a PpuRegisters,
     line: u8,
     sprite_height: u8,
@@ -133,7 +133,7 @@ impl SpriteRenderer {
     /// Render sprites for the current line onto the background buffer
     pub fn render_sprites_line(
         &self,
-        vram: &[u8; 0x2000],
+        vram: &Vec<u8>,
         registers: &PpuRegisters,
         line: u8,
         bg_buffer: &[u8; 160],
@@ -253,13 +253,7 @@ impl SpriteRenderer {
     }
 
     /// Get a single pixel from sprite tile data
-    fn get_sprite_pixel(
-        &self,
-        vram: &[u8; 0x2000],
-        tile_index: u8,
-        pixel_x: u8,
-        pixel_y: u8,
-    ) -> u8 {
+    fn get_sprite_pixel(&self, vram: &Vec<u8>, tile_index: u8, pixel_x: u8, pixel_y: u8) -> u8 {
         // Sprite tiles always use the 0x8000-0x8FFF area (unsigned mode)
         let tile_addr = (tile_index as u16) * 16;
         let row_addr = tile_addr + (pixel_y as u16) * 2;

@@ -43,7 +43,7 @@ pub struct Ppu {
 
     /// Video RAM (0x8000-0x9FFF)
     /// Contains tile data and tile maps
-    vram: [u8; 0x2000],
+    vram: Vec<u8>,
 
     /// Object Attribute Memory (0xFE00-0xFE9F)
     /// Contains sprite data (40 sprites × 4 bytes each)
@@ -51,7 +51,7 @@ pub struct Ppu {
 
     /// Frame buffer for output (160×144 pixels, RGBA format)
     /// Each pixel is 4 bytes: [R, G, B, A]
-    framebuffer: [u8; memory_sizes::MEM_BUFF_SIZE],
+    framebuffer: Vec<u8>,
 
     /// Flag indicating if a new frame is ready for display
     frame_ready: bool,
@@ -84,9 +84,9 @@ impl Ppu {
             dots: 0,
             scanline: 0,
             registers: PpuRegisters::new(),
-            vram: [0; 0x2000],
+            vram: vec![0; 0x2000],
             oam: [0; 0xA0],
-            framebuffer: [0; 160 * 144 * 4],
+            framebuffer: vec![0; memory_sizes::MEM_BUFF_SIZE],
             frame_ready: false,
             line_buffer: [0; 160],
             bg_renderer: BackgroundRenderer::new(),
@@ -310,7 +310,7 @@ impl Ppu {
 
     /// Get the current framebuffer
     /// Should only be called after checking is_frame_ready()
-    pub fn get_framebuffer(&mut self) -> &[u8; memory_sizes::MEM_BUFF_SIZE] {
+    pub fn get_framebuffer(&mut self) -> &Vec<u8> {
         self.frame_ready = false;
         &self.framebuffer
     }
