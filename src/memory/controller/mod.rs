@@ -11,8 +11,12 @@ mod no_controller;
 #[cfg(test)]
 mod tests;
 
+pub(crate) trait InternalMemoryBankController: Debug {
+    fn rom(&self) -> &Vec<u8>;
+    fn ram(&self) -> Option<&Vec<u8>>;
+}
 /// Memory Bank Controller trait for different cartridge types
-pub trait MemoryBankController: Debug {
+pub trait MemoryBankController: InternalMemoryBankController {
     fn read(&self, addr: u16) -> Option<u8>;
     fn write(&mut self, addr: u16, value: u8);
     fn get_mapper_type(&self) -> MapperType;

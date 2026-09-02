@@ -5,29 +5,23 @@ pub mod registers;
 #[cfg(test)]
 mod tests;
 
-use crate::memory::{MemoryBus, cart::Cart};
+use crate::{
+    cpu::instructions::Instruction::Nop,
+    memory::{MemoryBus, cart::Cart, memory_sizes},
+};
 use instructions::*;
 use log::{debug, trace};
 use registers::Register;
 
 pub struct Cpu {
-    #[cfg_attr(test, allow(dead_code))]
     pub(crate) status: CpuStatus,
-    #[cfg_attr(test, allow(dead_code))]
     pub(crate) register: Register,
-    #[cfg_attr(test, allow(dead_code))]
     pub(crate) program_counter: u16,
-    #[cfg_attr(test, allow(dead_code))]
     pub(crate) stack_pointer: u16,
-    #[cfg_attr(test, allow(dead_code))]
     pub(crate) memory: MemoryBus,
-    #[cfg_attr(test, allow(dead_code))]
     pub(crate) step_count: u8,
-    #[cfg_attr(test, allow(dead_code))]
     pub(crate) instruction: Instruction,
-    #[cfg_attr(test, allow(dead_code))]
     pub(crate) ime: bool,
-    #[cfg_attr(test, allow(dead_code))]
     pub(crate) ime_next: bool,
 }
 
@@ -84,6 +78,19 @@ impl Cpu {
 
         cpu.reset();
         cpu
+    }
+    pub fn empty() -> Self {
+        Self {
+            status: CpuStatus::Halted,
+            register: Register::new(),
+            program_counter: 0,
+            stack_pointer: 0,
+            memory: MemoryBus::empty(),
+            step_count: 0,
+            instruction: Nop,
+            ime: false,
+            ime_next: false,
+        }
     }
 
     pub fn request_interrupt(&mut self, interrupt: Interrupt) {
@@ -383,7 +390,7 @@ impl Cpu {
         self.memory.is_frame_ready()
     }
 
-    pub fn get_framebuffer(&mut self) -> &[u8; 160 * 144 * 4] {
+    pub fn get_framebuffer(&mut self) -> &[u8; memory_sizes::MEM_BUFF_SIZE] {
         self.memory.get_framebuffer()
     }
 

@@ -1,23 +1,22 @@
 {
-  // Use IntelliSense to learn about possible attributes.
-  // Hover to view descriptions of existing attributes.
-  // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
-  "version": "0.2.0",
-  "configurations": [
-    {
-      "request": "launch",
-      "name": "Launch",
-      "type": "lldb",
-      "cargo": {
-        "args": [
-          "build",
-          "--bin=cash-gb"
-        ],
-        "filter": {
-          "kind": "bin"
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug executable 'cash-gb'",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "run",
+                    "--bin=cash-gb",
+                ]
+            },
+            "args": [
+                ".\\roms\\dmg_test_prog_ver1.gb"
+            ]
         }
-      }
-    }
-
-  ]
+    ]
 }

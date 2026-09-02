@@ -1,8 +1,8 @@
-pub mod registers;
-pub mod timing;
 pub mod background;
-pub mod sprites;
 pub mod display;
+pub mod registers;
+pub mod sprites;
+pub mod timing;
 
 #[cfg(test)]
 mod tests;
@@ -16,12 +16,12 @@ mod debug_sprite_test;
 #[cfg(test)]
 mod debug_test_expectations;
 
-use registers::PpuRegisters;
-pub use timing::LcdMode;
-use crate::cpu::instructions::Interrupt;
+use crate::{cpu::instructions::Interrupt, memory::memory_sizes};
 use background::BackgroundRenderer;
-use sprites::SpriteRenderer;
 use display::ColorConverter;
+use registers::PpuRegisters;
+use sprites::SpriteRenderer;
+pub use timing::LcdMode;
 
 /// Game Boy Picture Processing Unit (PPU)
 ///
@@ -51,7 +51,7 @@ pub struct Ppu {
 
     /// Frame buffer for output (160×144 pixels, RGBA format)
     /// Each pixel is 4 bytes: [R, G, B, A]
-    framebuffer: [u8; 160 * 144 * 4],
+    framebuffer: [u8; memory_sizes::MEM_BUFF_SIZE],
 
     /// Flag indicating if a new frame is ready for display
     frame_ready: bool,
@@ -136,7 +136,8 @@ impl Ppu {
         if self.dots >= 80 {
             // Perform OAM scan for sprites on this line
             let sprite_height = if self.registers.sprite_size() { 16 } else { 8 };
-            self.sprite_renderer.scan_sprites_for_line(&self.oam, self.scanline, sprite_height);
+            self.sprite_renderer
+                .scan_sprites_for_line(&self.oam, self.scanline, sprite_height);
 
             self.dots = 0;
             self.mode = LcdMode::Drawing;
@@ -192,7 +193,9 @@ impl Ppu {
             }
 
             // Check LYC=LY interrupt
-            if self.registers.is_lyc_interrupt_enabled() && self.scanline == self.registers.get_lyc() {
+            if self.registers.is_lyc_interrupt_enabled()
+                && self.scanline == self.registers.get_lyc()
+            {
                 self.registers.set_lyc_flag(true);
                 return Some(Interrupt::LCD);
             } else {
@@ -293,7 +296,7 @@ impl Ppu {
             // Convert Game Boy color index to RGBA using color converter
             let (r, g, b) = ColorConverter::gb_color_to_rgb(color_index);
 
-            self.framebuffer[pixel_start] = r;     // Red
+            self.framebuffer[pixel_start] = r; // Red
             self.framebuffer[pixel_start + 1] = g; // Green
             self.framebuffer[pixel_start + 2] = b; // Blue
             self.framebuffer[pixel_start + 3] = 255; // Alpha
@@ -307,7 +310,7 @@ impl Ppu {
 
     /// Get the current framebuffer
     /// Should only be called after checking is_frame_ready()
-    pub fn get_framebuffer(&mut self) -> &[u8; 160 * 144 * 4] {
+    pub fn get_framebuffer(&mut self) -> &[u8; memory_sizes::MEM_BUFF_SIZE] {
         self.frame_ready = false;
         &self.framebuffer
     }

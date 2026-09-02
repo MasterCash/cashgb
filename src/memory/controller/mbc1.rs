@@ -4,6 +4,7 @@ use crate::memory::{
         MapperType,
         cart_header::{addresses, get_ram_size, get_rom_size},
     },
+    controller::InternalMemoryBankController,
     controller::MemoryBankController,
     memory_sizes,
 };
@@ -97,6 +98,15 @@ impl MBC1 {
     }
 }
 
+impl InternalMemoryBankController for MBC1 {
+    fn rom(&self) -> &Vec<u8> {
+        &self.rom
+    }
+
+    fn ram(&self) -> Option<&Vec<u8>> {
+        Some(&self.ram)
+    }
+}
 impl MemoryBankController for MBC1 {
     fn read(&self, addr: u16) -> Option<u8> {
         use mbc1_addresses::*;

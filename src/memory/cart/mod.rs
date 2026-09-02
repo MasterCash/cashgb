@@ -1,5 +1,7 @@
 use std::fmt::{Debug, Display};
 
+use crate::memory::{cart::MapperType::None, controller, memory_sizes};
+
 use super::controller::MemoryBankController;
 use cart_header::{
     get_licensee, get_ram_size, get_rom_size, validate_header_checksum, validate_nintendo_logo,
@@ -13,7 +15,7 @@ mod cart_types;
 pub mod tests;
 
 pub struct Cart {
-    mbc: Box<dyn MemoryBankController>,
+    pub(crate) mbc: Box<dyn MemoryBankController>,
     title: String,
     cgb: bool,
     cart_type: CartType,
@@ -111,6 +113,24 @@ impl Cart {
             version,
             mbc,
         })
+    }
+
+    pub fn empty() -> Self {
+        Cart {
+            mbc: controller::create_mbc(None, vec![0; memory_sizes::MEM_32_KILOBYTES as usize])
+                .unwrap(),
+            title: "".to_string(),
+            cgb: false,
+            cart_type: CartType::new(&0).unwrap(),
+            licensee: "".to_string(),
+            sgb: false,
+            rom_size: 0,
+            rom_banks: 0,
+            ram_size: 0,
+            ram_banks: 0,
+            destination: false,
+            version: 0,
+        }
     }
 
     pub fn read(&self, addr: &u16) -> Option<u8> {

@@ -3,6 +3,7 @@ use crate::memory::{
         MapperType,
         cart_header::{addresses, ram_codes},
     },
+    controller::InternalMemoryBankController,
     controller::MemoryBankController,
     memory_sizes,
 };
@@ -11,18 +12,32 @@ use crate::memory::{
 #[derive(Debug)]
 pub struct NoMBC {
     rom: Vec<u8>,
-    ram: Option<[u8; memory_sizes::MEM_8_KILOBYTES as usize]>,
+    ram: Option<Vec<u8>>,
 }
 
 impl NoMBC {
     pub fn new(rom: Vec<u8>) -> Self {
         Self {
             ram: if rom[addresses::ROM_SIZE as usize] == ram_codes::CODE_8_KILOBYTES {
-                Some([0; memory_sizes::MEM_8_KILOBYTES as usize])
+                Some(Vec::with_capacity(memory_sizes::MEM_8_KILOBYTES as usize))
             } else {
                 None
             },
             rom,
+        }
+    }
+}
+
+impl InternalMemoryBankController for NoMBC {
+    fn rom(&self) -> &Vec<u8> {
+        &self.rom
+    }
+
+    fn ram(&self) -> Option<&Vec<u8>> {
+        if let Some(ram) = &self.ram {
+            Some(ram)
+        } else {
+            None
         }
     }
 }
@@ -37,7 +52,18 @@ impl MemoryBankController for NoMBC {
                     None
                 }
             }
-            0xA000..=0xBFFF => self.ram.map(|ram| ram[addr as usize - 0xA000]),
+            0xA000..=0xBFFF => {
+                if let Some(ram) = &self.ram {
+                    let addr = (addr - 0xA000) as usize;
+                    if addr < ram.len() {
+                        Some(ram[addr])
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            }
             _ => None,
         }
     }
@@ -45,10 +71,9 @@ impl MemoryBankController for NoMBC {
     fn write(&mut self, addr: u16, value: u8) {
         // ROM is read-only for NoMBC
         if let 0xA000..=0xBFFF = addr
-            && let Some(mut ram) = self.ram
+            && let Some(ram) = &mut self.ram
         {
             ram[addr as usize - 0xA000] = value;
-            self.ram = Some(ram);
         }
     }
 

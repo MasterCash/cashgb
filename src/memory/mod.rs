@@ -19,17 +19,18 @@ pub mod memory_sizes {
     pub const MEM_512_KILOBYTES: u32 = MEM_256_KILOBYTES * 2;
     pub const MEM_1_MEGABYTE: u32 = MEM_512_KILOBYTES * 2;
     pub const MEM_2_MEGABYTES: u32 = MEM_1_MEGABYTE * 2;
+    pub const MEM_BUFF_SIZE: usize = 160 * 144 * 4;
 }
 
 pub struct MemoryBus {
-    cart: Cart,
-    ppu: Ppu,
-    v_ram_bank: u8,
-    w_ram: [[u8; 0x2000]; 8],
-    w_ram_bank: u8,
-    io_registers: [u8; 0x80],
-    h_ram: [u8; 0x80],
-    ie: u8,
+    pub(crate) cart: Cart,
+    pub(crate) ppu: Ppu,
+    pub(crate) v_ram_bank: u8,
+    pub(crate) w_ram: [[u8; 0x2000]; 8],
+    pub(crate) w_ram_bank: u8,
+    pub(crate) io_registers: [u8; 0x80],
+    pub(crate) h_ram: [u8; 0x80],
+    pub(crate) ie: u8,
 }
 
 impl MemoryBus {
@@ -40,6 +41,18 @@ impl MemoryBus {
             v_ram_bank: 0,
             w_ram: [[0; 0x2000]; 8],
             w_ram_bank: 1,
+            io_registers: [0; 0x80],
+            h_ram: [0; 0x80],
+            ie: 0,
+        }
+    }
+    pub fn empty() -> Self {
+        Self {
+            cart: Cart::empty(),
+            ppu: Ppu::new(),
+            v_ram_bank: 0,
+            w_ram: [[0; 0x2000]; 8],
+            w_ram_bank: 0,
             io_registers: [0; 0x80],
             h_ram: [0; 0x80],
             ie: 0,
@@ -198,7 +211,7 @@ impl MemoryBus {
         self.ppu.is_frame_ready()
     }
 
-    pub fn get_framebuffer(&mut self) -> &[u8; 160 * 144 * 4] {
+    pub fn get_framebuffer(&mut self) -> &[u8; memory_sizes::MEM_BUFF_SIZE] {
         self.ppu.get_framebuffer()
     }
 

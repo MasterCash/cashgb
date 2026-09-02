@@ -1,9 +1,7 @@
-use cash_gb::{cpu::Cpu, read_cart};
-use cash_gb::ppu::display::{Display, TerminalDisplay};
+use cash_gb::read_cart;
+use cash_gb::ui::App;
 use clap::Parser;
-use log::{info, LevelFilter};
-use std::time::{Duration, Instant};
-use std::thread;
+use log::{LevelFilter, info};
 
 #[derive(Parser)]
 #[command(name = "cash-gb")]
@@ -17,9 +15,8 @@ struct Args {
     trace: bool,
 }
 
-fn main() {
+fn main() -> eframe::Result {
     let args = Args::parse();
-
     // Initialize logger based on trace flag
     let log_level = if args.trace {
         LevelFilter::Trace
@@ -31,6 +28,13 @@ fn main() {
         .filter_level(log_level)
         .init();
 
+    let native_options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([800.0, 600.0])
+            .with_min_inner_size([600.0, 440.0]),
+        ..Default::default()
+    };
+
     // Load the cartridge
     let cart = match read_cart(&args.rom_file) {
         Ok(cart) => cart,
@@ -41,7 +45,20 @@ fn main() {
     };
 
     info!("Cart loaded successfully: {}", args.rom_file);
+    std::thread::Builder::new()
+        .stack_size(8 * 1024 * 1024) // 8 MB stack
+        .spawn(|| {
+            let result = eframe::run_native(
+                "cash-gb",
+                native_options,
+                Box::new(|_| Ok(Box::new(App::new(cart)))),
+            ); // Run your eframe app here
+        })
+        .unwrap()
+        .join()
+        .unwrap();
 
+    /*
     // Create CPU and display
     let mut cpu = Cpu::new(cart);
     let mut display = TerminalDisplay::new(true); // Use color output
@@ -59,14 +76,18 @@ fn main() {
     loop {
         // Step CPU until a frame is ready
         let mut steps_this_frame: usize = 0;
-        while !cpu.is_frame_ready() { // Max cycles per frame
+        while !cpu.is_frame_ready() {
+            // Max cycles per frame
             cpu.step();
             steps_this_frame = steps_this_frame.wrapping_add(1);
             total_steps = total_steps.wrapping_add(1);
 
             // Debug: Check if we're stuck after frame 19
             if frame_count >= 19 && steps_this_frame == 100000 {
-                info!("Breaking infinite loop after 100k steps - PPU appears to be stuck after frame {}", frame_count);
+                info!(
+                    "Breaking infinite loop after 100k steps - PPU appears to be stuck after frame {}",
+                    frame_count
+                );
                 break;
             }
         }
@@ -76,7 +97,10 @@ fn main() {
             let framebuffer = cpu.get_framebuffer();
             display.present_frame(framebuffer);
             frame_count = frame_count.wrapping_add(1);
-            info!("Frame {} rendered after {} steps this frame, {} total steps", frame_count, steps_this_frame, total_steps);
+            info!(
+                "Frame {} rendered after {} steps this frame, {} total steps",
+                frame_count, steps_this_frame, total_steps
+            );
 
             // Frame rate limiting
             let elapsed = last_frame_time.elapsed();
@@ -86,10 +110,13 @@ fn main() {
             last_frame_time = Instant::now();
 
             // Exit after a reasonable number of frames for demo
-            if frame_count >= 30000 { // About 5 seconds at 60 FPS
+            if frame_count >= 30000 {
+                // About 5 seconds at 60 FPS
                 println!("Demo complete - {} frames rendered", frame_count);
                 break;
             }
         }
     }
+    */
+    Ok(())
 }
