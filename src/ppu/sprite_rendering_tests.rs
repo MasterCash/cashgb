@@ -35,7 +35,14 @@ fn create_test_sprite_tile_data(ppu: &mut Ppu) {
     }
 }
 
-fn create_test_sprite_oam_data(ppu: &mut Ppu, sprite_index: usize, y: u8, x: u8, tile: u8, attrs: u8) {
+fn create_test_sprite_oam_data(
+    ppu: &mut Ppu,
+    sprite_index: usize,
+    y: u8,
+    x: u8,
+    tile: u8,
+    attrs: u8,
+) {
     let oam_offset = sprite_index * 4;
     ppu.oam[oam_offset] = y;
     ppu.oam[oam_offset + 1] = x;
@@ -49,7 +56,8 @@ fn render_line_with_oam_scan(ppu: &mut Ppu, line: u8) {
 
     // Perform OAM scan (normally done during OAM scan mode)
     let sprite_height = if ppu.registers.sprite_size() { 16 } else { 8 };
-    ppu.sprite_renderer.scan_sprites_for_line(&ppu.oam, ppu.scanline, sprite_height);
+    ppu.sprite_renderer
+        .scan_sprites_for_line(&ppu.oam, ppu.scanline, sprite_height);
 
     // Render the line
     ppu.render_scanline();
@@ -74,13 +82,21 @@ fn test_sprite_rendering_basic() {
     for x in 8..16 {
         let color = ppu.line_buffer[x];
         // Should be sprite color, not background color
-        assert_eq!(color, expected_sprite, "Sprite pixel should be rendered at X={}", x);
+        assert_eq!(
+            color, expected_sprite,
+            "Sprite pixel should be rendered at X={}",
+            x
+        );
     }
 
     // Pixels outside sprite area should be background
     for x in 0..8 {
         let color = ppu.line_buffer[x];
-        assert_eq!(color, expected_bg, "Background pixel should be rendered at X={}", x);
+        assert_eq!(
+            color, expected_bg,
+            "Background pixel should be rendered at X={}",
+            x
+        );
     }
 }
 
@@ -114,7 +130,11 @@ fn test_sprite_transparency() {
     for x in 8..16 {
         let color = ppu.line_buffer[x];
         let expected_bg = ppu.registers.get_bg_color(0);
-        assert_eq!(color, expected_bg, "Transparent sprite pixel should show background at X={}", x);
+        assert_eq!(
+            color, expected_bg,
+            "Transparent sprite pixel should show background at X={}",
+            x
+        );
     }
 
     // Test line 1 (second row - opaque color 1)
@@ -124,7 +144,11 @@ fn test_sprite_transparency() {
     for x in 8..16 {
         let color = ppu.line_buffer[x];
         let expected_sprite = ppu.registers.get_sprite_color(0, 1);
-        assert_eq!(color, expected_sprite, "Opaque sprite pixel should be rendered at X={}", x);
+        assert_eq!(
+            color, expected_sprite,
+            "Opaque sprite pixel should be rendered at X={}",
+            x
+        );
     }
 }
 
@@ -144,7 +168,11 @@ fn test_sprite_priority() {
     // High priority sprite should be visible at X=8-15
     for x in 8..16 {
         let color = ppu.line_buffer[x];
-        assert_ne!(color, 0, "High priority sprite should be rendered at X={}", x);
+        assert_ne!(
+            color, 0,
+            "High priority sprite should be rendered at X={}",
+            x
+        );
     }
 
     // Low priority sprite area depends on background - if BG is color 0, sprite shows
@@ -182,13 +210,8 @@ fn test_sprite_horizontal_flipping() {
     // Create asymmetric sprite pattern
     let tile_data = [
         0b11110000, 0b00000000, // Row 0: left half color 1, right half color 0
-        0b11110000, 0b00000000,
-        0b11110000, 0b00000000,
-        0b11110000, 0b00000000,
-        0b11110000, 0b00000000,
-        0b11110000, 0b00000000,
-        0b11110000, 0b00000000,
-        0b11110000, 0b00000000,
+        0b11110000, 0b00000000, 0b11110000, 0b00000000, 0b11110000, 0b00000000, 0b11110000,
+        0b00000000, 0b11110000, 0b00000000, 0b11110000, 0b00000000, 0b11110000, 0b00000000,
     ];
 
     for (i, &byte) in tile_data.iter().enumerate() {
@@ -204,19 +227,28 @@ fn test_sprite_horizontal_flipping() {
     render_line_with_oam_scan(&mut ppu, 0);
 
     // Normal sprite: left side should be opaque, right side background
-    let left_normal = ppu.line_buffer[8];  // First pixel of normal sprite
+    let left_normal = ppu.line_buffer[8]; // First pixel of normal sprite
     let right_normal = ppu.line_buffer[15]; // Last pixel of normal sprite
     let bg_color = ppu.registers.get_bg_color(0);
 
     assert_ne!(left_normal, bg_color, "Normal sprite left should be opaque");
-    assert_eq!(right_normal, bg_color, "Normal sprite right should be transparent");
+    assert_eq!(
+        right_normal, bg_color,
+        "Normal sprite right should be transparent"
+    );
 
     // Flipped sprite: right side should be opaque, left side background
-    let left_flipped = ppu.line_buffer[24];  // First pixel of flipped sprite
+    let left_flipped = ppu.line_buffer[24]; // First pixel of flipped sprite
     let right_flipped = ppu.line_buffer[31]; // Last pixel of flipped sprite
 
-    assert_eq!(left_flipped, bg_color, "Flipped sprite left should be transparent");
-    assert_ne!(right_flipped, bg_color, "Flipped sprite right should be opaque");
+    assert_eq!(
+        left_flipped, bg_color,
+        "Flipped sprite left should be transparent"
+    );
+    assert_ne!(
+        right_flipped, bg_color,
+        "Flipped sprite right should be opaque"
+    );
 }
 
 #[test]
@@ -226,13 +258,9 @@ fn test_sprite_vertical_flipping() {
     // Create asymmetric sprite pattern (different top and bottom)
     let tile_data = [
         0b11111111, 0b00000000, // Row 0: top - all color 1
-        0b11111111, 0b00000000,
-        0b11111111, 0b00000000,
-        0b11111111, 0b00000000,
-        0b00000000, 0b11111111, // Row 4: bottom - all color 2
-        0b00000000, 0b11111111,
-        0b00000000, 0b11111111,
-        0b00000000, 0b11111111,
+        0b11111111, 0b00000000, 0b11111111, 0b00000000, 0b11111111, 0b00000000, 0b00000000,
+        0b11111111, // Row 4: bottom - all color 2
+        0b00000000, 0b11111111, 0b00000000, 0b11111111, 0b00000000, 0b11111111,
     ];
 
     for (i, &byte) in tile_data.iter().enumerate() {
@@ -255,7 +283,10 @@ fn test_sprite_vertical_flipping() {
     let color2 = ppu.registers.get_sprite_color(0, 2);
 
     assert_eq!(normal_top, color1, "Normal sprite top should be color 1");
-    assert_eq!(flipped_top, color2, "Flipped sprite top should be color 2 (flipped from bottom)");
+    assert_eq!(
+        flipped_top, color2,
+        "Flipped sprite top should be color 2 (flipped from bottom)"
+    );
 }
 
 #[test]
@@ -269,25 +300,15 @@ fn test_sprite_8x16_mode() {
     // Top tile (tile 0)
     let top_tile = [
         0b11111111, 0b00000000, // All color 1
-        0b11111111, 0b00000000,
-        0b11111111, 0b00000000,
-        0b11111111, 0b00000000,
-        0b11111111, 0b00000000,
-        0b11111111, 0b00000000,
-        0b11111111, 0b00000000,
-        0b11111111, 0b00000000,
+        0b11111111, 0b00000000, 0b11111111, 0b00000000, 0b11111111, 0b00000000, 0b11111111,
+        0b00000000, 0b11111111, 0b00000000, 0b11111111, 0b00000000, 0b11111111, 0b00000000,
     ];
 
     // Bottom tile (tile 1)
     let bottom_tile = [
         0b00000000, 0b11111111, // All color 2
-        0b00000000, 0b11111111,
-        0b00000000, 0b11111111,
-        0b00000000, 0b11111111,
-        0b00000000, 0b11111111,
-        0b00000000, 0b11111111,
-        0b00000000, 0b11111111,
-        0b00000000, 0b11111111,
+        0b00000000, 0b11111111, 0b00000000, 0b11111111, 0b00000000, 0b11111111, 0b00000000,
+        0b11111111, 0b00000000, 0b11111111, 0b00000000, 0b11111111, 0b00000000, 0b11111111,
     ];
 
     // Write tile data
@@ -306,14 +327,20 @@ fn test_sprite_8x16_mode() {
 
     let top_color = ppu.line_buffer[8];
     let expected_top = ppu.registers.get_sprite_color(0, 1);
-    assert_eq!(top_color, expected_top, "8x16 sprite top should use top tile");
+    assert_eq!(
+        top_color, expected_top,
+        "8x16 sprite top should use top tile"
+    );
 
     // Test bottom half (line 8)
     render_line_with_oam_scan(&mut ppu, 8);
 
     let bottom_color = ppu.line_buffer[8];
     let expected_bottom = ppu.registers.get_sprite_color(0, 2);
-    assert_eq!(bottom_color, expected_bottom, "8x16 sprite bottom should use bottom tile");
+    assert_eq!(
+        bottom_color, expected_bottom,
+        "8x16 sprite bottom should use bottom tile"
+    );
 }
 
 #[test]
@@ -329,7 +356,8 @@ fn test_sprite_oam_scan_integration() {
     // Manually trigger OAM scan
     ppu.scanline = 0;
     let sprite_height = if ppu.registers.sprite_size() { 16 } else { 8 };
-    ppu.sprite_renderer.scan_sprites_for_line(&ppu.oam, ppu.scanline, sprite_height);
+    ppu.sprite_renderer
+        .scan_sprites_for_line(&ppu.oam, ppu.scanline, sprite_height);
 
     // All 5 sprites should be found
     assert_eq!(ppu.sprite_renderer.sprite_count(), 5);
@@ -342,7 +370,11 @@ fn test_sprite_oam_scan_integration() {
         let sprite_x = 8 + (i * 16); // Screen X positions
         if sprite_x < 160 {
             let color = ppu.line_buffer[sprite_x];
-            assert_ne!(color, 0, "Sprite {} should be rendered at X={}", i, sprite_x);
+            assert_ne!(
+                color, 0,
+                "Sprite {} should be rendered at X={}",
+                i, sprite_x
+            );
         }
     }
 }
@@ -371,7 +403,10 @@ fn test_sprite_background_interaction() {
 
     // High priority sprite should always show over background
     let high_priority_color = ppu.line_buffer[8];
-    assert_ne!(high_priority_color, 0, "High priority sprite should be visible");
+    assert_ne!(
+        high_priority_color, 0,
+        "High priority sprite should be visible"
+    );
 
     // Low priority sprite visibility depends on background color
     // This test verifies the priority system is working
@@ -390,7 +425,8 @@ fn test_sprite_render_pipeline_integration() {
 
     // 1. OAM Scan should find sprites
     let sprite_height = if ppu.registers.sprite_size() { 16 } else { 8 };
-    ppu.sprite_renderer.scan_sprites_for_line(&ppu.oam, ppu.scanline, sprite_height);
+    ppu.sprite_renderer
+        .scan_sprites_for_line(&ppu.oam, ppu.scanline, sprite_height);
     assert_eq!(ppu.sprite_renderer.sprite_count(), 1);
 
     // 2. Rendering should work without panic
@@ -409,6 +445,9 @@ fn test_sprite_render_pipeline_integration() {
     // Color should match expected Game Boy palette
     let color_index = ppu.line_buffer[8];
     let (expected_r, expected_g, expected_b) = ColorConverter::gb_color_to_rgb(color_index);
-    assert_eq!((r, g, b), (expected_r, expected_g, expected_b),
-              "Framebuffer should match color conversion");
+    assert_eq!(
+        (r, g, b),
+        (expected_r, expected_g, expected_b),
+        "Framebuffer should match color conversion"
+    );
 }

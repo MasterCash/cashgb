@@ -1,10 +1,6 @@
-use console::Alignment::Center;
-use egui::{Color32, Layout, Rect, RichText, Sense, Stroke, Vec2, vec2};
+use egui::{Color32, Layout, Rect, RichText, Sense, Vec2, vec2};
 
-use crate::{
-    cpu::Cpu,
-    memory::{cart::Cart, memory_sizes},
-};
+use crate::{cpu::Cpu, memory::cart::Cart};
 
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)]
@@ -22,7 +18,7 @@ impl Default for App {
         Self {
             scale: Default::default(),
             cpu: Cpu::empty(),
-            frame_buffer: vec![0; memory_sizes::MEM_BUFF_SIZE],
+            frame_buffer: Vec::new(),
         }
     }
 }
@@ -32,7 +28,7 @@ impl App {
         Self {
             scale: 5.0,
             cpu: Cpu::new(cart),
-            frame_buffer: vec![0; memory_sizes::MEM_BUFF_SIZE],
+            frame_buffer: Vec::new(),
         }
     }
 }
@@ -54,28 +50,48 @@ impl eframe::App for App {
         });
 
         egui::Panel::left("registers").show(ui, |ui| {
+            let step_clicked = ui.button("Step").interact(Sense::click());
+            if step_clicked.clicked() {
+                self.cpu.step();
+            }
+            let step_clicked = ui.button("Next Instruction").interact(Sense::click());
+            if step_clicked.clicked() {
+                self.cpu.step_instruction();
+            }
+            ui.vertical(|ui| {
+                ui.label("instruction: ");
+                ui.label(format!("{:#?}", self.cpu.instruction))
+            });
             ui.horizontal(|ui| {
-                ui.label("AF");
+                ui.label("Status: ");
+                ui.label(format!("{:#?}", self.cpu.status))
+            });
+            ui.horizontal(|ui| {
+                ui.label("Step Count: ");
+                ui.label(format!("{}", self.cpu.step_count))
+            });
+            ui.horizontal(|ui| {
+                ui.label("AF: ");
                 ui.label(format!("{:b}", self.cpu.get_af()))
             });
             ui.horizontal(|ui| {
-                ui.label("BC");
+                ui.label("BC: ");
                 ui.label(format!("{:b}", self.cpu.get_bc()))
             });
             ui.horizontal(|ui| {
-                ui.label("DE");
+                ui.label("DE: ");
                 ui.label(format!("{:b}", self.cpu.get_de()))
             });
             ui.horizontal(|ui| {
-                ui.label("HL");
+                ui.label("HL: ");
                 ui.label(format!("{:b}", self.cpu.get_hl()))
             });
             ui.horizontal(|ui| {
-                ui.label("PC");
+                ui.label("PC: ");
                 ui.label(format!("{:X}", self.cpu.get_pc()))
             });
             ui.horizontal(|ui| {
-                ui.label("SP");
+                ui.label("SP: ");
                 ui.label(format!("{:X}", self.cpu.get_sp()))
             });
         });
@@ -165,8 +181,11 @@ impl eframe::App for App {
                 .into();
             let (response, painter) = ui.allocate_painter(size, Sense::empty());
             let origin = response.rect.min;
-            let pixels =
-                egui::ColorImage::from_rgba_unmultiplied([160, 144], &self.frame_buffer).pixels;
+            let pixels = if self.frame_buffer.is_empty() {
+                vec![]
+            } else {
+                egui::ColorImage::from_rgba_unmultiplied([160, 144], &self.frame_buffer).pixels
+            };
             for row in 0..GB_SCREEN_HEIGHT {
                 for col in 0..GB_SCREEN_WIDTH {
                     let rect = Rect::from_min_size(
@@ -175,7 +194,7 @@ impl eframe::App for App {
                     );
                     let pixel = pixels
                         .get((row * GB_SCREEN_WIDTH + col) as usize)
-                        .unwrap_or(&Color32::BLACK);
+                        .unwrap_or(&Color32::WHITE);
                     painter.rect_filled(rect, 0.0, *pixel);
                 }
             }

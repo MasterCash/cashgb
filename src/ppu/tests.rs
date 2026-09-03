@@ -1,8 +1,8 @@
 #[cfg(test)]
 mod tests {
-    use crate::ppu::{Ppu, LcdMode};
-    use crate::ppu::display::{DebugDisplay, Display};
     use crate::cpu::instructions::Interrupt;
+    use crate::ppu::display::{DebugDisplay, Display};
+    use crate::ppu::{LcdMode, Ppu};
 
     /// Helper function to create a PPU for testing
     fn create_test_ppu() -> Ppu {
@@ -253,7 +253,7 @@ mod tests {
 
         // Set up LYC interrupt
         ppu.registers.write_stat(0x40); // Enable LYC interrupt
-        ppu.registers.set_lyc(50);       // Trigger on line 50
+        ppu.registers.set_lyc(50); // Trigger on line 50
 
         // Set up HBlank at line 49
         ppu.mode = LcdMode::HBlank;

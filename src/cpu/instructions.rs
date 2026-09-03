@@ -285,6 +285,7 @@ pub enum Instruction {
     Call(JumpCondition),
     Restart(u16),
     CB,
+    RES(u8, BitwiseSource),
 }
 
 impl Display for Instruction {
@@ -330,6 +331,7 @@ impl Display for Instruction {
             Instruction::ShiftLeftArithmetic(s) => write!(f, "SLA {:?}", s),
             Instruction::Swap(s) => write!(f, "SWAP {:?}", s),
             Instruction::Bit(b, s) => write!(f, "BIT {:#x} {:?}", b, s),
+            Instruction::RES(pos, s) => write!(f, "RES {:#x} {:?}", pos, s),
         }
     }
 }
@@ -833,6 +835,7 @@ impl Instruction {
             0x68..=0x6f => (Instruction::Bit(5, source), cycles),
             0x70..=0x77 => (Instruction::Bit(6, source), cycles),
             0x78..=0x7f => (Instruction::Bit(7, source), cycles),
+            0x80..=0x87 => (Instruction::RES(0, source), cycles),
             _ => panic!("Unknown Instruction: {:#x}", byte),
         }
     }

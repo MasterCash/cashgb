@@ -84,7 +84,8 @@ impl PpuTiming {
     pub const VBLANK_SCANLINES: u8 = 10;
 
     /// Total dots per frame
-    pub const DOTS_PER_FRAME: u32 = Self::DOTS_PER_SCANLINE as u32 * Self::SCANLINES_PER_FRAME as u32;
+    pub const DOTS_PER_FRAME: u32 =
+        Self::DOTS_PER_SCANLINE as u32 * Self::SCANLINES_PER_FRAME as u32;
 
     /// OAM Scan duration
     pub const OAM_SCAN_DOTS: u16 = 80;

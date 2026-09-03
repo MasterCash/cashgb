@@ -26,6 +26,16 @@ pub struct Cpu {
 }
 
 impl Cpu {
+    pub fn step_instruction(&mut self) {
+        self.step();
+        while self.status != CpuStatus::Errored
+            && self.status != CpuStatus::Stopped
+            && self.status != CpuStatus::Halted
+            && self.step_count > 0
+        {
+            self.step();
+        }
+    }
     pub fn step(&mut self) {
         if CpuStatus::Errored == self.status || self.status == CpuStatus::Stopped {
             return;
@@ -274,6 +284,7 @@ impl Cpu {
             Instruction::Swap(source) => self.swap(source),
             Instruction::Or(source) => self.or(source),
             Instruction::Jump(condition) => self.jump(condition),
+            Instruction::RES(pos, source) => self.res(pos, source),
         }
     }
 
@@ -323,7 +334,7 @@ impl Cpu {
         if pending_interrupts != 0 && self.status == CpuStatus::Halted {
             self.status = CpuStatus::Running;
             debug!(
-                "CPU woken from HALT due to pending interrupt: {:#02X}",
+                "CPU woken from HALT due to pending interrupt: {:#X}",
                 pending_interrupts
             );
         }

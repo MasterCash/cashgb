@@ -1,5 +1,5 @@
-use super::instructions::*;
 use super::Cpu;
+use super::instructions::*;
 use log::trace;
 
 impl Cpu {
@@ -160,20 +160,17 @@ impl Cpu {
     }
 
     pub(super) fn bit(&mut self, bit: u8, source: BitwiseSource) {
-        let source = match source {
-            BitwiseSource::B => self.register.get_b(),
-            BitwiseSource::C => self.register.get_c(),
-            BitwiseSource::D => self.register.get_d(),
-            BitwiseSource::E => self.register.get_e(),
-            BitwiseSource::H => self.register.get_h(),
-            BitwiseSource::L => self.register.get_l(),
-            BitwiseSource::A => self.register.get_a(),
-            BitwiseSource::HLAddr => self.read(&self.register.get_hl()),
-        };
-
+        let source = self.get_bitwise_source(source);
         self.update_flag(Flag::Z, ((source >> bit) & 1) == 0);
         self.set_flag(Flag::H);
         self.clear_flag(Flag::N);
+    }
+
+    pub(super) fn res(&mut self, pos: u8, source: BitwiseSource) {
+        let value = self.get_bitwise_source(source);
+        let bit = !(1 << pos);
+        let value = value & bit;
+        self.set_bitwise_source(source, value);
     }
 
     pub(super) fn jump_relative(&mut self, condition: JumpCondition) {
@@ -376,50 +373,8 @@ impl Cpu {
         self.write(&sp, lsb);
     }
     pub(super) fn rotate_left(&mut self, source: BitwiseSource) {
-        let c = match source {
-            BitwiseSource::B => {
-                let c = self.register.get_b() >> 7;
-                self.register.set_b(self.register.get_b() << 1);
-                c
-            }
-            BitwiseSource::C => {
-                let c = self.register.get_c() >> 7;
-                self.register.set_c(self.register.get_c() << 1);
-                c
-            }
-            BitwiseSource::D => {
-                let c = self.register.get_d() >> 7;
-                self.register.set_d(self.register.get_d() << 1);
-                c
-            }
-            BitwiseSource::E => {
-                let c = self.register.get_e() >> 7;
-                self.register.set_e(self.register.get_e() << 1);
-                c
-            }
-            BitwiseSource::H => {
-                let c = self.register.get_h() >> 7;
-                self.register.set_h(self.register.get_h() << 1);
-                c
-            }
-            BitwiseSource::L => {
-                let c = self.register.get_l() >> 7;
-                self.register.set_l(self.register.get_l() << 1);
-                c
-            }
-            BitwiseSource::A => {
-                let c = self.register.get_a() >> 7;
-                self.register.set_a(self.register.get_a() << 1);
-                c
-            }
-            BitwiseSource::HLAddr => {
-                let n = self.read(&self.register.get_hl());
-                let c = n >> 7;
-                self.write(&self.register.get_hl(), n << 1);
-                c
-            }
-        };
-
+        let c = self.get_bitwise_source(source) >> 7;
+        self.set_bitwise_source(source, c << 1);
         self.update_flag(Flag::C, c == 1);
     }
     pub(super) fn pop(&mut self, target: PopTarget) {
@@ -742,40 +697,9 @@ impl Cpu {
         self.program_counter = self.register.get_hl();
     }
     pub(super) fn rotate(&mut self, source: BitwiseSource, rotate: impl Fn(&mut Cpu, u8) -> u8) {
-        match source {
-            BitwiseSource::B => {
-                let n = rotate(self, self.register.get_b());
-                self.register.set_b(n);
-            }
-            BitwiseSource::C => {
-                let n = rotate(self, self.register.get_c());
-                self.register.set_c(n);
-            }
-            BitwiseSource::D => {
-                let n = rotate(self, self.register.get_d());
-                self.register.set_d(n);
-            }
-            BitwiseSource::E => {
-                let n = rotate(self, self.register.get_e());
-                self.register.set_e(n);
-            }
-            BitwiseSource::H => {
-                let n = rotate(self, self.register.get_h());
-                self.register.set_h(n);
-            }
-            BitwiseSource::L => {
-                let n = rotate(self, self.register.get_l());
-                self.register.set_l(n);
-            }
-            BitwiseSource::A => {
-                let n = rotate(self, self.register.get_a());
-                self.register.set_a(n);
-            }
-            BitwiseSource::HLAddr => {
-                let n = rotate(self, self.read(&self.register.get_hl()));
-                self.write(&self.register.get_hl(), n);
-            }
-        };
+        let source_value = self.get_bitwise_source(source);
+        let n = rotate(self, source_value);
+        self.set_bitwise_source(source, n);
     }
     pub(super) fn sub_carry(&mut self, source: SubtractCarrySource) {
         let source = match source {
@@ -814,40 +738,9 @@ impl Cpu {
             let upper = value << 4;
             lower | upper
         };
-        match source {
-            BitwiseSource::B => {
-                let n = swap(self, self.register.get_b());
-                self.register.set_b(n);
-            }
-            BitwiseSource::C => {
-                let n = swap(self, self.register.get_c());
-                self.register.set_c(n);
-            }
-            BitwiseSource::D => {
-                let n = swap(self, self.register.get_d());
-                self.register.set_d(n);
-            }
-            BitwiseSource::E => {
-                let n = swap(self, self.register.get_e());
-                self.register.set_e(n);
-            }
-            BitwiseSource::H => {
-                let n = swap(self, self.register.get_h());
-                self.register.set_h(n);
-            }
-            BitwiseSource::L => {
-                let n = swap(self, self.register.get_l());
-                self.register.set_l(n);
-            }
-            BitwiseSource::A => {
-                let n = swap(self, self.register.get_a());
-                self.register.set_a(n);
-            }
-            BitwiseSource::HLAddr => {
-                let n = swap(self, self.read(&self.register.get_hl()));
-                self.write(&self.register.get_hl(), n);
-            }
-        }
+        let source_value = self.get_bitwise_source(source);
+        let n = swap(self, source_value);
+        self.set_bitwise_source(source, n);
     }
     pub(super) fn or(&mut self, source: OrSource) {
         let source = match source {
@@ -896,5 +789,29 @@ impl Cpu {
         } else {
             self.program_counter = self.program_counter.wrapping_add(2);
         }
+    }
+    pub(super) fn get_bitwise_source(&self, source: BitwiseSource) -> u8 {
+        match source {
+            BitwiseSource::B => self.register.get_b(),
+            BitwiseSource::C => self.register.get_c(),
+            BitwiseSource::D => self.register.get_d(),
+            BitwiseSource::E => self.register.get_e(),
+            BitwiseSource::H => self.register.get_h(),
+            BitwiseSource::L => self.register.get_l(),
+            BitwiseSource::HLAddr => self.read(&self.register.get_hl()),
+            BitwiseSource::A => self.register.get_a(),
+        }
+    }
+    pub(super) fn set_bitwise_source(&mut self, source: BitwiseSource, value: u8) {
+        match source {
+            BitwiseSource::B => self.register.set_b(value),
+            BitwiseSource::C => self.register.set_c(value),
+            BitwiseSource::D => self.register.set_d(value),
+            BitwiseSource::E => self.register.set_e(value),
+            BitwiseSource::H => self.register.set_h(value),
+            BitwiseSource::L => self.register.set_l(value),
+            BitwiseSource::HLAddr => self.write(&self.register.get_hl(), value),
+            BitwiseSource::A => self.register.set_a(value),
+        };
     }
 }

@@ -1,7 +1,7 @@
+use crate::cpu::Cpu;
 /// Comprehensive integration tests for CPU-PPU-Memory Bus integration
 /// Tests complex interactions, timing, interrupts, and edge cases
 use crate::cpu::instructions::CpuStatus;
-use crate::cpu::Cpu;
 use crate::memory::cart::Cart;
 use crate::ppu::LcdMode;
 
@@ -11,10 +11,10 @@ fn create_test_cart() -> Cart {
 
     // Set up minimal Nintendo logo (required for cart validation)
     let nintendo_logo = [
-        0xCE, 0xED, 0x66, 0x66, 0xCC, 0x0D, 0x00, 0x0B, 0x03, 0x73, 0x00, 0x83, 0x00, 0x0C,
-        0x00, 0x0D, 0x00, 0x08, 0x11, 0x1F, 0x88, 0x89, 0x00, 0x0E, 0xDC, 0xCC, 0x6E, 0xE6,
-        0xDD, 0xDD, 0xD9, 0x99, 0xBB, 0xBB, 0x67, 0x63, 0x6E, 0x0E, 0xEC, 0xCC, 0xDD, 0xDC,
-        0x99, 0x9F, 0xBB, 0xB9, 0x33, 0x3E,
+        0xCE, 0xED, 0x66, 0x66, 0xCC, 0x0D, 0x00, 0x0B, 0x03, 0x73, 0x00, 0x83, 0x00, 0x0C, 0x00,
+        0x0D, 0x00, 0x08, 0x11, 0x1F, 0x88, 0x89, 0x00, 0x0E, 0xDC, 0xCC, 0x6E, 0xE6, 0xDD, 0xDD,
+        0xD9, 0x99, 0xBB, 0xBB, 0x67, 0x63, 0x6E, 0x0E, 0xEC, 0xCC, 0xDD, 0xDC, 0x99, 0x9F, 0xBB,
+        0xB9, 0x33, 0x3E,
     ];
 
     for (i, &byte) in nintendo_logo.iter().enumerate() {
@@ -134,7 +134,8 @@ fn test_interrupt_generation_integration() {
     let target_cycles = 144 * 456 / 4; // Divide by 4 since we step 4 cycles at a time
 
     let mut vblank_triggered = false;
-    for _ in 0..target_cycles + 100 { // Add buffer
+    for _ in 0..target_cycles + 100 {
+        // Add buffer
         step_ppu_cycles(&mut cpu, 1);
 
         // Check if we're in VBlank and interrupt was triggered
@@ -167,13 +168,15 @@ fn test_lyc_interrupt_integration() {
 
     // Step until we reach line 10
     let mut lyc_match_found = false;
-    for _ in 0..5000 { // Safety limit
+    for _ in 0..5000 {
+        // Safety limit
         step_ppu_cycles(&mut cpu, 1);
 
         let ly = cpu.read(&0xFF44);
         let stat = cpu.read(&0xFF41);
 
-        if ly == 10 && (stat & 0x04) != 0 { // LYC=LY flag set
+        if ly == 10 && (stat & 0x04) != 0 {
+            // LYC=LY flag set
             lyc_match_found = true;
             break;
         }
@@ -250,7 +253,10 @@ fn test_frame_completion_integration() {
         }
     }
 
-    assert!(frame_completed, "A complete frame should have been rendered");
+    assert!(
+        frame_completed,
+        "A complete frame should have been rendered"
+    );
 
     // Should be able to get framebuffer
     let framebuffer = cpu.get_framebuffer();
@@ -273,7 +279,10 @@ fn test_lcd_disable_enable_integration() {
     // PPU starts at line 0, so after stepping it should have advanced
     // We'll check the PPU mode instead to verify it's running
     let mode = cpu.memory.get_ppu().get_current_mode();
-    assert!(mode != LcdMode::VBlank || ly_enabled > 0, "PPU should be running when LCD is enabled");
+    assert!(
+        mode != LcdMode::VBlank || ly_enabled > 0,
+        "PPU should be running when LCD is enabled"
+    );
 
     // Disable LCD
     cpu.write(&0xFF40, 0x00);
@@ -281,7 +290,10 @@ fn test_lcd_disable_enable_integration() {
 
     // LY should not advance when LCD is disabled
     let ly_disabled = cpu.read(&0xFF44);
-    assert_eq!(ly_disabled, ly_enabled, "LY should not advance when LCD disabled");
+    assert_eq!(
+        ly_disabled, ly_enabled,
+        "LY should not advance when LCD disabled"
+    );
 
     // Re-enable LCD
     cpu.write(&0xFF40, 0x80);
@@ -336,7 +348,7 @@ fn test_interrupt_priority_integration() {
     // Enable LCD and set up for multiple interrupts
     cpu.write(&0xFF40, 0x80); // LCD on
     cpu.write(&0xFF41, 0x50); // STAT - VBlank and LYC interrupts enabled
-    cpu.write(&0xFF45, 5);    // LYC = 5
+    cpu.write(&0xFF45, 5); // LYC = 5
     cpu.write(&0xFFFF, 0x1F); // IE - All interrupts enabled
     cpu.ime = true;
 
@@ -362,9 +374,14 @@ fn test_interrupt_priority_integration() {
     let lyc_flag = (stat_reg & 0x04) != 0;
     let in_vblank = cpu.memory.get_ppu().get_current_mode() == LcdMode::VBlank;
 
-    assert!(lyc_flag || in_vblank || ly == lyc,
-           "Interrupt conditions should be met: LYC flag={}, VBlank={}, LY={}, LYC={}",
-           lyc_flag, in_vblank, ly, lyc);
+    assert!(
+        lyc_flag || in_vblank || ly == lyc,
+        "Interrupt conditions should be met: LYC flag={}, VBlank={}, LY={}, LYC={}",
+        lyc_flag,
+        in_vblank,
+        ly,
+        lyc
+    );
 
     // System should still be running (interrupts handled properly)
     assert_eq!(cpu.status, CpuStatus::Running);

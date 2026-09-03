@@ -47,13 +47,13 @@ impl PpuRegisters {
     /// Create new PPU registers with Game Boy boot values
     pub fn new() -> Self {
         Self {
-            lcdc: 0x91,   // LCD enabled, background on, sprites on
-            stat: 0x00,   // Mode 0, no interrupts
+            lcdc: 0x91, // LCD enabled, background on, sprites on
+            stat: 0x00, // Mode 0, no interrupts
             scy: 0x00,
             scx: 0x00,
             ly: 0x00,
             lyc: 0x00,
-            bgp: 0xFC,    // Standard Game Boy palette
+            bgp: 0xFC, // Standard Game Boy palette
             obp0: 0xFF,
             obp1: 0xFF,
             wy: 0x00,
@@ -318,14 +318,14 @@ impl PpuRegisters {
             0xFF41 => self.write_stat(value),
             0xFF42 => self.set_scy(value),
             0xFF43 => self.set_scx(value),
-            0xFF44 => {}, // LY is read-only
+            0xFF44 => {} // LY is read-only
             0xFF45 => self.set_lyc(value),
             0xFF47 => self.set_bgp(value),
             0xFF48 => self.set_obp0(value),
             0xFF49 => self.set_obp1(value),
             0xFF4A => self.set_wy(value),
             0xFF4B => self.set_wx(value),
-            _ => {}, // Invalid register, ignore
+            _ => {} // Invalid register, ignore
         }
     }
 }

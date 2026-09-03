@@ -21,5 +21,8 @@ fn debug_test_expectations() {
 
     // BGP = 0xFC means color 0 maps to palette color 0
     // This is correct Game Boy behavior
-    assert_eq!(bg_color_0, 0, "With default BGP=0xFC, color 0 should map to palette color 0");
+    assert_eq!(
+        bg_color_0, 0,
+        "With default BGP=0xFC, color 0 should map to palette color 0"
+    );
 }
