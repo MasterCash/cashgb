@@ -253,7 +253,7 @@ impl SpriteRenderer {
     }
 
     /// Get a single pixel from sprite tile data
-    fn get_sprite_pixel(&self, vram: &Vec<u8>, tile_index: u8, pixel_x: u8, pixel_y: u8) -> u8 {
+    fn get_sprite_pixel(&self, vram: &[u8], tile_index: u8, pixel_x: u8, pixel_y: u8) -> u8 {
         // Sprite tiles always use the 0x8000-0x8FFF area (unsigned mode)
         let tile_addr = (tile_index as u16) * 16;
         let row_addr = tile_addr + (pixel_y as u16) * 2;

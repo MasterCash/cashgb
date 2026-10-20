@@ -32,7 +32,7 @@ impl BackgroundRenderer {
     /// Render background line to the provided buffer
     pub fn render_background_line(
         &self,
-        vram: &Vec<u8>,
+        vram: &[u8],
         registers: &PpuRegisters,
         line: u8,
         buffer: &mut [u8; 160],
@@ -85,7 +85,7 @@ impl BackgroundRenderer {
     /// Render window line to the provided buffer
     pub fn render_window_line(
         &mut self,
-        vram: &Vec<u8>,
+        vram: &[u8],
         registers: &PpuRegisters,
         line: u8,
         buffer: &mut [u8; 160],
@@ -138,7 +138,7 @@ impl BackgroundRenderer {
     /// Get a single pixel from a tile
     fn get_tile_pixel(
         &self,
-        vram: &Vec<u8>,
+        vram: &[u8],
         tile_index: u8,
         pixel_x: u8,
         pixel_y: u8,

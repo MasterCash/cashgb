@@ -25,8 +25,8 @@ fn create_test_cart() -> Cart {
 
     // Calculate and set header checksum
     let mut checksum: u8 = 0;
-    for addr in 0x0134..=0x014C {
-        checksum = checksum.wrapping_sub(rom_data[addr]).wrapping_sub(1);
+    for byte in &rom_data[0x0134..=0x014C] {
+        checksum = checksum.wrapping_sub(*byte).wrapping_sub(1);
     }
     rom_data[0x014D] = checksum;
 

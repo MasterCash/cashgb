@@ -65,12 +65,6 @@ impl MBC1 {
         }
     }
 
-    pub fn get_ram_size(&self) -> Result<(u32, u8, u8), CartError> {
-        let code = self.rom[addresses::RAM_SIZE as usize];
-        let (size, count) = get_ram_size(&code)?;
-        Ok((size, count, code))
-    }
-
     pub fn get_rom_size(&self) -> Result<(u32, u16, u8), CartError> {
         let code = self.rom[addresses::ROM_SIZE as usize];
         let (size, count) = get_rom_size(&code)?;

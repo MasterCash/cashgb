@@ -13,6 +13,8 @@ mod tests;
 
 pub(crate) trait InternalMemoryBankController: Debug {
     fn rom(&self) -> &Vec<u8>;
+    // Not used yet; kept for reading cartridge RAM when saving battery-backed carts.
+    #[allow(dead_code)]
     fn ram(&self) -> Option<&Vec<u8>>;
 }
 /// Memory Bank Controller trait for different cartridge types

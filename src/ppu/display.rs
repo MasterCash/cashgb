@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 /// Display trait for different output backends
 pub trait Display {
     /// Present a completed frame to the display
-    fn present_frame(&mut self, framebuffer: &Vec<u8>);
+    fn present_frame(&mut self, framebuffer: &[u8]);
 
     /// Check if the display is ready for a new frame
     fn is_ready(&self) -> bool {
@@ -66,7 +66,7 @@ impl TerminalDisplay {
 }
 
 impl Display for TerminalDisplay {
-    fn present_frame(&mut self, framebuffer: &Vec<u8>) {
+    fn present_frame(&mut self, framebuffer: &[u8]) {
         self.frame_count += 1;
 
         // Clear screen and move cursor to top
@@ -109,7 +109,7 @@ impl Display for TerminalDisplay {
 pub struct NullDisplay;
 
 impl Display for NullDisplay {
-    fn present_frame(&mut self, _framebuffer: &Vec<u8>) {
+    fn present_frame(&mut self, _framebuffer: &[u8]) {
         // Do nothing
     }
 
@@ -141,7 +141,7 @@ impl DebugDisplay {
 }
 
 impl Display for DebugDisplay {
-    fn present_frame(&mut self, framebuffer: &Vec<u8>) {
+    fn present_frame(&mut self, framebuffer: &[u8]) {
         self.frame_count += 1;
 
         // Calculate some statistics about the frame
@@ -368,7 +368,7 @@ impl Default for GuiDisplay {
 }
 
 impl Display for GuiDisplay {
-    fn present_frame(&mut self, framebuffer: &Vec<u8>) {
+    fn present_frame(&mut self, framebuffer: &[u8]) {
         self.framebuffer.copy_from_slice(framebuffer);
         self.frame_count += 1;
     }
