@@ -47,9 +47,8 @@ impl Cpu {
         }
 
         // Step PPU (assuming 4 cycles per CPU step for timing)
-        if let Some(interrupt) = self.memory.step_ppu(4) {
-            self.request_interrupt(interrupt);
-        }
+        let ppu_interrupts = self.memory.step_ppu(4);
+        self.memory.request_interrupts(ppu_interrupts);
 
         // handle instructions
         if self.step_count == 0 {

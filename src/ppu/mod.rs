@@ -68,6 +68,9 @@ pub struct Ppu {
     /// Sprite rendering buffers
     sprite_buffer: [u8; 160],
     sprite_priority_buffer: [bool; 160],
+
+    /// Combined STAT interrupt line (all enabled STAT sources ORed), for rising-edge detection
+    stat_line: bool,
 }
 
 impl Default for Ppu {
@@ -93,6 +96,7 @@ impl Ppu {
             sprite_renderer: SpriteRenderer::new(),
             sprite_buffer: [0; 160],
             sprite_priority_buffer: [false; 160],
+            stat_line: false,
         }
     }
 
@@ -110,29 +114,60 @@ impl Ppu {
         self.bg_renderer.reset();
         self.sprite_buffer.fill(0);
         self.sprite_priority_buffer.fill(false);
+        self.stat_line = false;
     }
 
     /// Step the PPU by the given number of CPU cycles
-    /// Returns an interrupt if one should be triggered
-    pub fn step(&mut self, cycles: u8) -> Option<Interrupt> {
+    /// Returns the interrupts requested during this step as IF bits (VBlank and/or LCD STAT)
+    pub fn step(&mut self, cycles: u8) -> u8 {
         // If LCD is disabled, don't process anything
         if !self.registers.is_lcd_enabled() {
-            return None;
+            return 0;
         }
 
         self.dots += cycles as u16;
 
-        match self.mode {
+        let mut interrupts = match self.mode {
             LcdMode::OamScan => self.handle_oam_scan(),
             LcdMode::Drawing => self.handle_drawing(),
             LcdMode::HBlank => self.handle_hblank(),
             LcdMode::VBlank => self.handle_vblank(),
+        };
+
+        if self.update_stat() {
+            interrupts |= Interrupt::LCD as u8;
         }
+        interrupts
+    }
+
+    /// Refresh the LYC=LY flag and the STAT interrupt line.
+    /// All STAT sources share one line, so the LCD interrupt fires only on its rising edge.
+    fn update_stat(&mut self) -> bool {
+        self.update_lyc_flag();
+
+        let registers = &self.registers;
+        let line = (registers.get_lyc_flag() && registers.is_lyc_interrupt_enabled())
+            || match self.mode {
+                LcdMode::HBlank => registers.is_hblank_interrupt_enabled(),
+                LcdMode::VBlank => registers.is_vblank_interrupt_enabled(),
+                LcdMode::OamScan => registers.is_oam_interrupt_enabled(),
+                LcdMode::Drawing => false,
+            };
+
+        let rising = line && !self.stat_line;
+        self.stat_line = line;
+        rising
+    }
+
+    /// STAT bit 2 always reflects LY == LYC, whether or not the LYC interrupt is enabled.
+    fn update_lyc_flag(&mut self) {
+        let equal = self.registers.get_ly() == self.registers.get_lyc();
+        self.registers.set_lyc_flag(equal);
     }
 
     /// Handle OAM Scan mode (Mode 2)
     /// Scans OAM for sprites on current scanline
-    fn handle_oam_scan(&mut self) -> Option<Interrupt> {
+    fn handle_oam_scan(&mut self) -> u8 {
         if self.dots >= 80 {
             // Perform OAM scan for sprites on this line
             let sprite_height = if self.registers.sprite_size() { 16 } else { 8 };
@@ -143,12 +178,12 @@ impl Ppu {
             self.mode = LcdMode::Drawing;
             self.registers.set_mode(LcdMode::Drawing);
         }
-        None
+        0
     }
 
     /// Handle Drawing mode (Mode 3)
     /// Renders pixels for current scanline
-    fn handle_drawing(&mut self) -> Option<Interrupt> {
+    fn handle_drawing(&mut self) -> u8 {
         if self.dots >= 172 {
             // Render the current scanline
             self.render_scanline();
@@ -156,18 +191,13 @@ impl Ppu {
             self.dots = 0;
             self.mode = LcdMode::HBlank;
             self.registers.set_mode(LcdMode::HBlank);
-
-            // Check for STAT interrupt on Mode 0 (HBlank)
-            if self.registers.is_hblank_interrupt_enabled() {
-                return Some(Interrupt::LCD);
-            }
         }
-        None
+        0
     }
 
     /// Handle Horizontal Blank mode (Mode 0)
     /// Waits until end of scanline
-    fn handle_hblank(&mut self) -> Option<Interrupt> {
+    fn handle_hblank(&mut self) -> u8 {
         if self.dots >= 204 {
             self.dots = 0;
             self.scanline = self.scanline.wrapping_add(1);
@@ -180,34 +210,19 @@ impl Ppu {
                 self.frame_ready = true;
 
                 // VBlank interrupt
-                return Some(Interrupt::VBlank);
-            } else {
-                // Next scanline
-                self.mode = LcdMode::OamScan;
-                self.registers.set_mode(LcdMode::OamScan);
-
-                // Check for STAT interrupt on Mode 2 (OAM)
-                if self.registers.is_oam_interrupt_enabled() {
-                    return Some(Interrupt::LCD);
-                }
+                return Interrupt::VBlank as u8;
             }
 
-            // Check LYC=LY interrupt
-            if self.registers.is_lyc_interrupt_enabled()
-                && self.scanline == self.registers.get_lyc()
-            {
-                self.registers.set_lyc_flag(true);
-                return Some(Interrupt::LCD);
-            } else {
-                self.registers.set_lyc_flag(false);
-            }
+            // Next scanline
+            self.mode = LcdMode::OamScan;
+            self.registers.set_mode(LcdMode::OamScan);
         }
-        None
+        0
     }
 
     /// Handle Vertical Blank mode (Mode 1)
     /// Waits for next frame
-    fn handle_vblank(&mut self) -> Option<Interrupt> {
+    fn handle_vblank(&mut self) -> u8 {
         if self.dots >= 456 {
             self.dots = 0;
             self.scanline = self.scanline.wrapping_add(1);
@@ -219,14 +234,9 @@ impl Ppu {
                 self.registers.set_ly(0);
                 self.mode = LcdMode::OamScan;
                 self.registers.set_mode(LcdMode::OamScan);
-
-                // Check for STAT interrupt on Mode 2 (OAM)
-                if self.registers.is_oam_interrupt_enabled() {
-                    return Some(Interrupt::LCD);
-                }
             }
         }
-        None
+        0
     }
 
     /// Render the current scanline to the line buffer
@@ -392,6 +402,10 @@ impl Ppu {
         } else if !was_enabled && is_enabled {
             self.enable_lcd();
         }
+
+        // A new LYC (or LY reset) is reflected in STAT immediately. The STAT line itself is
+        // only re-evaluated on the next step, so a resulting interrupt still fires there.
+        self.update_lyc_flag();
     }
 
     /// LCD off: LY resets to 0, mode reads 0 (HBlank) and VRAM/OAM are freely accessible.
@@ -401,6 +415,7 @@ impl Ppu {
         self.registers.set_ly(0);
         self.mode = LcdMode::HBlank;
         self.registers.set_mode(LcdMode::HBlank);
+        self.stat_line = false;
     }
 
     /// LCD on: start a fresh frame at line 0.

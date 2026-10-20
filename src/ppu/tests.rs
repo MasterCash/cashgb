@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod tests {
+mod ppu_tests {
     use crate::cpu::instructions::Interrupt;
     use crate::ppu::display::{DebugDisplay, Display};
     use crate::ppu::{LcdMode, Ppu};
@@ -49,7 +49,7 @@ mod tests {
 
         // Step should return None when LCD is disabled
         let interrupt = ppu.step(10);
-        assert!(interrupt.is_none());
+        assert_eq!(interrupt, 0);
     }
 
     #[test]
@@ -60,13 +60,13 @@ mod tests {
         // Step through OAM scan (should take 80 dots)
         for _ in 0..7 {
             let interrupt = ppu.step(10);
-            assert!(interrupt.is_none());
+            assert_eq!(interrupt, 0);
             assert_eq!(ppu.mode, LcdMode::OamScan);
         }
 
         // Should transition to Drawing mode after 80 dots
         let interrupt = ppu.step(10); // Total: 80 dots
-        assert!(interrupt.is_none());
+        assert_eq!(interrupt, 0);
         assert_eq!(ppu.mode, LcdMode::Drawing);
         assert_eq!(ppu.dots, 0); // Dots should reset
     }
@@ -82,13 +82,13 @@ mod tests {
         // Step through Drawing mode (minimum 172 dots)
         for _ in 0..17 {
             let interrupt = ppu.step(10);
-            assert!(interrupt.is_none());
+            assert_eq!(interrupt, 0);
             assert_eq!(ppu.mode, LcdMode::Drawing);
         }
 
         // Should transition to HBlank after 172+ dots
         let interrupt = ppu.step(10); // Total: 180 dots
-        assert!(interrupt.is_none());
+        assert_eq!(interrupt, 0);
         assert_eq!(ppu.mode, LcdMode::HBlank);
     }
 
@@ -104,13 +104,13 @@ mod tests {
         // Step through HBlank
         for _ in 0..20 {
             let interrupt = ppu.step(10);
-            assert!(interrupt.is_none());
+            assert_eq!(interrupt, 0);
             assert_eq!(ppu.mode, LcdMode::HBlank);
         }
 
         // Should transition to next OAM scan
         let interrupt = ppu.step(10); // Total: 210 dots (> 204)
-        assert!(interrupt.is_none());
+        assert_eq!(interrupt, 0);
         assert_eq!(ppu.mode, LcdMode::OamScan);
         assert_eq!(ppu.scanline, 11); // Should increment scanline
     }
@@ -129,7 +129,7 @@ mod tests {
         ppu.dots = 204;
         let interrupt = ppu.step(1);
 
-        assert_eq!(interrupt, Some(Interrupt::VBlank));
+        assert_eq!(interrupt, Interrupt::VBlank as u8);
         assert_eq!(ppu.mode, LcdMode::VBlank);
         assert_eq!(ppu.scanline, 144);
         assert!(ppu.frame_ready);
@@ -147,13 +147,13 @@ mod tests {
         // Step through VBlank scanline
         for _ in 0..45 {
             let interrupt = ppu.step(10);
-            assert!(interrupt.is_none());
+            assert_eq!(interrupt, 0);
             assert_eq!(ppu.mode, LcdMode::VBlank);
         }
 
         // Should move to next VBlank line
         let interrupt = ppu.step(10); // Total: 460 dots (> 456)
-        assert!(interrupt.is_none());
+        assert_eq!(interrupt, 0);
         assert_eq!(ppu.mode, LcdMode::VBlank);
         assert_eq!(ppu.scanline, 151);
     }
@@ -170,7 +170,7 @@ mod tests {
 
         // Should start new frame
         let interrupt = ppu.step(1);
-        assert!(interrupt.is_none());
+        assert_eq!(interrupt, 0);
         assert_eq!(ppu.mode, LcdMode::OamScan);
         assert_eq!(ppu.scanline, 0);
         assert_eq!(ppu.dots, 0);
@@ -243,7 +243,7 @@ mod tests {
         ppu.dots = 172;
 
         let interrupt = ppu.step(1);
-        assert_eq!(interrupt, Some(Interrupt::LCD));
+        assert_eq!(interrupt, Interrupt::LCD as u8);
         assert_eq!(ppu.mode, LcdMode::HBlank);
     }
 
@@ -262,7 +262,7 @@ mod tests {
 
         // Should trigger LYC interrupt when moving to line 50
         let interrupt = ppu.step(1);
-        assert_eq!(interrupt, Some(Interrupt::LCD));
+        assert_eq!(interrupt, Interrupt::LCD as u8);
         assert_eq!(ppu.scanline, 50);
         assert!(ppu.registers.get_lyc_flag());
     }
@@ -364,7 +364,7 @@ mod tests {
         ppu.write_register(0xFF40, 0x00);
 
         for _ in 0..1000 {
-            assert_eq!(ppu.step(4), None);
+            assert_eq!(ppu.step(4), 0);
         }
 
         assert_eq!(ppu.registers.get_ly(), 0);
@@ -398,5 +398,123 @@ mod tests {
         assert_eq!(ppu.scanline, 10);
         assert_eq!(ppu.dots, 40);
         assert_eq!(ppu.get_current_mode(), LcdMode::HBlank);
+    }
+
+    /// Step until LY equals `line`, returning the OR of all interrupts requested on the way.
+    fn step_to_line(ppu: &mut Ppu, line: u8) -> u8 {
+        let mut interrupts = 0;
+        for _ in 0..20_000 {
+            if ppu.registers.get_ly() == line {
+                return interrupts;
+            }
+            interrupts |= ppu.step(4);
+        }
+        panic!("LY never reached {line}");
+    }
+
+    #[test]
+    fn test_lyc_flag_set_without_lyc_interrupt_enabled() {
+        let mut ppu = create_test_ppu();
+        ppu.write_register(0xFF45, 10);
+
+        let interrupts = step_to_line(&mut ppu, 10);
+
+        assert!(ppu.registers.get_lyc_flag());
+        assert_eq!(interrupts & Interrupt::LCD as u8, 0);
+    }
+
+    #[test]
+    fn test_lyc_flag_set_on_vblank_line() {
+        let mut ppu = create_test_ppu();
+        ppu.write_register(0xFF45, 150);
+
+        step_to_line(&mut ppu, 150);
+
+        assert!(ppu.registers.get_lyc_flag());
+    }
+
+    #[test]
+    fn test_lyc_flag_cleared_on_next_line() {
+        let mut ppu = create_test_ppu();
+        ppu.write_register(0xFF45, 10);
+
+        step_to_line(&mut ppu, 11);
+
+        assert!(!ppu.registers.get_lyc_flag());
+    }
+
+    #[test]
+    fn test_lyc_write_updates_flag_immediately() {
+        let mut ppu = create_test_ppu();
+        ppu.write_register(0xFF45, 5);
+        assert!(!ppu.registers.get_lyc_flag());
+
+        ppu.write_register(0xFF45, 0); // LY is 0
+        assert!(ppu.registers.get_lyc_flag());
+    }
+
+    #[test]
+    fn test_vblank_and_stat_interrupts_in_same_step() {
+        let mut ppu = create_test_ppu();
+        ppu.write_register(0xFF41, 0x40); // LYC interrupt enabled
+        ppu.write_register(0xFF45, 144); // matches the first VBlank line
+        ppu.mode = LcdMode::HBlank;
+        ppu.scanline = 143;
+        ppu.registers.set_ly(143);
+        ppu.dots = 204;
+
+        let interrupts = ppu.step(1);
+
+        assert_eq!(interrupts, Interrupt::VBlank as u8 | Interrupt::LCD as u8);
+    }
+
+    #[test]
+    fn test_vblank_stat_source_fires_lcd_interrupt() {
+        let mut ppu = create_test_ppu();
+        ppu.write_register(0xFF41, 0x10); // Mode 1 (VBlank) STAT interrupt enabled
+        ppu.mode = LcdMode::HBlank;
+        ppu.scanline = 143;
+        ppu.registers.set_ly(143);
+        ppu.dots = 204;
+
+        let interrupts = ppu.step(1);
+
+        assert_eq!(interrupts, Interrupt::VBlank as u8 | Interrupt::LCD as u8);
+    }
+
+    #[test]
+    fn test_lyc_interrupt_fires_once_per_match() {
+        let mut ppu = create_test_ppu();
+        ppu.write_register(0xFF41, 0x40); // LYC interrupt enabled
+        ppu.write_register(0xFF45, 10);
+
+        let mut lcd_count = 0;
+        for _ in 0..20_000 {
+            if ppu.step(4) & Interrupt::LCD as u8 != 0 {
+                lcd_count += 1;
+            }
+            if ppu.registers.get_ly() == 12 {
+                break;
+            }
+        }
+
+        assert_eq!(lcd_count, 1);
+    }
+
+    #[test]
+    fn test_stat_sources_share_one_line() {
+        let mut ppu = create_test_ppu();
+        // HBlank and OAM sources both enabled: the line stays high from HBlank into the next
+        // line's OAM scan, so only the HBlank edge produces an interrupt.
+        ppu.write_register(0xFF41, 0x28);
+        ppu.mode = LcdMode::Drawing;
+        ppu.scanline = 5;
+        ppu.registers.set_ly(5);
+        ppu.dots = 172;
+
+        assert_eq!(ppu.step(1), Interrupt::LCD as u8); // Drawing -> HBlank: rising edge
+        ppu.dots = 204;
+        assert_eq!(ppu.step(1), 0); // HBlank -> OAM scan: line already high
+        assert_eq!(ppu.get_current_mode(), LcdMode::OamScan);
     }
 }

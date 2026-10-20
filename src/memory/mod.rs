@@ -195,8 +195,16 @@ impl MemoryBus {
 
     // Interrupt handling
     pub fn request_interrupt(&mut self, interrupt: Interrupt) {
+        self.request_interrupts(interrupt as u8);
+    }
+
+    /// Request several interrupts at once, given as IF bits
+    pub fn request_interrupts(&mut self, bits: u8) {
+        if bits == 0 {
+            return;
+        }
         let flags = self.read(0xff0f);
-        self.write(0xff0f, flags | interrupt as u8);
+        self.write(0xff0f, flags | bits);
     }
 
     // Getters for CPU state that depends on memory
@@ -209,7 +217,8 @@ impl MemoryBus {
     }
 
     // PPU integration methods
-    pub fn step_ppu(&mut self, cycles: u8) -> Option<Interrupt> {
+    /// Step the PPU, returning the requested interrupts as IF bits
+    pub fn step_ppu(&mut self, cycles: u8) -> u8 {
         self.ppu.step(cycles)
     }
 
