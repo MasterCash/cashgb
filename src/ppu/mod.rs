@@ -381,6 +381,14 @@ impl Ppu {
         }
     }
 
+    /// Write one byte of an OAM DMA transfer. DMA has its own path into OAM,
+    /// so unlike `write_oam` it isn't blocked during OAM Scan and Drawing.
+    pub fn dma_write_oam(&mut self, index: usize, value: u8) {
+        if index < self.oam.len() {
+            self.oam[index] = value;
+        }
+    }
+
     /// Get current scanline for debugging
     pub fn get_current_line(&self) -> u8 {
         self.scanline

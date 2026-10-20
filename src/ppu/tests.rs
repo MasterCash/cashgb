@@ -502,6 +502,19 @@ mod ppu_tests {
     }
 
     #[test]
+    fn test_dma_write_oam_bypasses_mode_lock() {
+        let mut ppu = create_test_ppu();
+        ppu.mode = LcdMode::Drawing;
+
+        ppu.write_oam(0xFE00, 0x11); // CPU write: blocked during Drawing
+        ppu.dma_write_oam(1, 0x22); // DMA write: always lands
+
+        ppu.mode = LcdMode::HBlank;
+        assert_eq!(ppu.read_oam(0xFE00), 0x00);
+        assert_eq!(ppu.read_oam(0xFE01), 0x22);
+    }
+
+    #[test]
     fn test_stat_sources_share_one_line() {
         let mut ppu = create_test_ppu();
         // HBlank and OAM sources both enabled: the line stays high from HBlank into the next

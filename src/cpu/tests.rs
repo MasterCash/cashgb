@@ -5,6 +5,9 @@ mod integration_tests;
 mod comprehensive_integration_tests;
 
 #[cfg(test)]
+mod review_regressions;
+
+#[cfg(test)]
 mod cpu_tests {
     use crate::cpu::Cpu;
     use crate::cpu::instructions::*;

@@ -282,7 +282,7 @@ impl Cpu {
                 self.rotate(source, |cpu: &mut Cpu, value: u8| {
                     let sign = value & 0x80;
                     let c = value & 0x01;
-                    let n = (value >> 1) & sign;
+                    let n = (value >> 1) | sign;
                     cpu.update_flag(Flag::C, c == 0x01);
                     cpu.update_flag(Flag::Z, n == 0);
                     cpu.clear_flag(Flag::H);

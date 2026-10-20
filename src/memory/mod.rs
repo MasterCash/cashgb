@@ -7,7 +7,7 @@ mod tests;
 use crate::cpu::instructions::{CpuStatus, Interrupt};
 use crate::ppu::Ppu;
 use cart::Cart;
-use log::{debug, trace, warn};
+use log::{trace, warn};
 
 pub mod memory_sizes {
     pub const MEM_4_KILOBYTES: u32 = 0x1000;
@@ -63,10 +63,7 @@ impl MemoryBus {
     pub fn read(&self, addr: u16) -> u8 {
         match addr {
             // ROM banks and cartridge RAM
-            0x0000..=0x7fff | 0xA000..=0xbfff => self
-                .cart
-                .read(&addr)
-                .unwrap_or_else(|| panic!("failed to read from cart: {:#x}", addr)),
+            0x0000..=0x7fff | 0xA000..=0xbfff => self.cart.read(&addr).unwrap_or(0xFF),
 
             // Video RAM - route through PPU for timing restrictions
             0x8000..=0x9fff => self.ppu.read_vram(addr),
@@ -93,6 +90,8 @@ impl MemoryBus {
             // I/O registers
             0xff00..=0xff7f => {
                 match addr {
+                    // OAM DMA source register reads back the last value written
+                    0xff46 => self.io_registers[0x46],
                     // PPU registers (0xFF40-0xFF4B)
                     0xFF40..=0xFF4B => self.ppu.registers.read_register(addr),
                     // Other I/O registers
@@ -113,11 +112,7 @@ impl MemoryBus {
         match addr {
             // ROM area - should not be writable, but cartridge may handle banking
             0x0000..=0x7fff => {
-                // MBC banking writes would go here
-                debug!(
-                    "attempting to write {:#x} to ROM address {:#x}",
-                    value, addr
-                );
+                self.cart.write(&addr, value);
             }
 
             // Video RAM - route through PPU for timing restrictions
@@ -163,6 +158,8 @@ impl MemoryBus {
             // I/O registers
             0xff00..=0xff7f => {
                 match addr {
+                    // OAM DMA (inside the PPU register range, so it must match first)
+                    0xff46 => self.oam_dma(value),
                     // PPU registers (0xFF40-0xFF4B)
                     0xFF40..=0xFF4B => {
                         self.ppu.write_register(addr, value);
@@ -191,6 +188,19 @@ impl MemoryBus {
 
         trace!("writing {:#x} to {:#x}", value, addr);
         None
+    }
+
+    /// OAM DMA: copy 160 bytes from `source_high << 8` into OAM.
+    ///
+    /// The copy happens instantly. Hardware takes 160 M-cycles and restricts the CPU to HRAM
+    /// meanwhile, but games run their DMA routine from HRAM and wait it out, so they can't tell.
+    fn oam_dma(&mut self, source_high: u8) {
+        self.io_registers[0x46] = source_high;
+        let source = (source_high as u16) << 8;
+        for offset in 0..0xA0u16 {
+            let byte = self.read(source + offset);
+            self.ppu.dma_write_oam(offset as usize, byte);
+        }
     }
 
     // Interrupt handling

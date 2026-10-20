@@ -16,14 +16,14 @@ pub(crate) trait InternalMemoryBankController: Debug {
     fn ram(&self) -> Option<&Vec<u8>>;
 }
 /// Memory Bank Controller trait for different cartridge types
-pub trait MemoryBankController: InternalMemoryBankController {
+pub(crate) trait MemoryBankController: InternalMemoryBankController {
     fn read(&self, addr: u16) -> Option<u8>;
     fn write(&mut self, addr: u16, value: u8);
     fn get_mapper_type(&self) -> MapperType;
 }
 
 /// Factory function to create appropriate MBC based on cartridge type
-pub fn create_mbc(
+pub(crate) fn create_mbc(
     mapper_type: MapperType,
     rom: Vec<u8>,
 ) -> Result<Box<dyn MemoryBankController>, CartError> {

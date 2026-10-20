@@ -17,14 +17,14 @@ pub struct NoMBC {
 
 impl NoMBC {
     pub fn new(rom: Vec<u8>) -> Self {
-        Self {
-            ram: if rom[addresses::ROM_SIZE as usize] == ram_codes::CODE_8_KILOBYTES {
-                Some(Vec::with_capacity(memory_sizes::MEM_8_KILOBYTES as usize))
-            } else {
-                None
-            },
-            rom,
-        }
+        let ram_code = rom[addresses::RAM_SIZE as usize];
+        let ram = if ram_code == ram_codes::CODE_8_KILOBYTES {
+            Some(vec![0; memory_sizes::MEM_8_KILOBYTES as usize])
+        } else {
+            None
+        };
+
+        Self { ram, rom }
     }
 }
 
@@ -70,10 +70,16 @@ impl MemoryBankController for NoMBC {
 
     fn write(&mut self, addr: u16, value: u8) {
         // ROM is read-only for NoMBC
-        if let 0xA000..=0xBFFF = addr
-            && let Some(ram) = &mut self.ram
-        {
-            ram[addr as usize - 0xA000] = value;
+        if let 0xA000..=0xBFFF = addr {
+            if let Some(ram) = &mut self.ram {
+                ram[addr as usize - 0xA000] = value;
+            } else {
+                panic!(
+                    "Attempted to write to RAM on a NoMBC cartridge without RAM: {}, {:#x}",
+                    self.ram.is_none(),
+                    self.rom[addresses::RAM_SIZE as usize]
+                );
+            }
         }
     }
 

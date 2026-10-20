@@ -65,11 +65,23 @@ impl MBC1 {
         }
     }
 
+    pub fn get_ram_size(&self) -> Result<(u32, u8, u8), CartError> {
+        let code = self.rom[addresses::RAM_SIZE as usize];
+        let (size, count) = get_ram_size(&code)?;
+        Ok((size, count, code))
+    }
+
+    pub fn get_rom_size(&self) -> Result<(u32, u16, u8), CartError> {
+        let code = self.rom[addresses::ROM_SIZE as usize];
+        let (size, count) = get_rom_size(&code)?;
+        Ok((size, count, code))
+    }
+
     pub fn new(rom: Vec<u8>) -> Result<Self, CartError> {
         let rom_code = rom[addresses::ROM_SIZE as usize];
         let ram_code = rom[addresses::RAM_SIZE as usize];
-        let (rom_size, _) = get_rom_size(&rom[addresses::ROM_SIZE as usize])?;
-        let (ram_size, _) = get_ram_size(&rom[addresses::RAM_SIZE as usize])?;
+        let (rom_size, _) = get_rom_size(&rom_code)?;
+        let (ram_size, _) = get_ram_size(&ram_code)?;
 
         if ram_size > memory_sizes::MEM_32_KILOBYTES {
             return Err(CartError::UnsupportedMapperRamSize(
@@ -152,12 +164,18 @@ impl MemoryBankController for MBC1 {
         match addr {
             // RAM Enable
             RAM_ENABLE_START..=RAM_ENABLE_END => {
-                self.ram_enabled = (value & 0x0A) == 0x0A;
+                self.ram_enabled = (value & 0x0F) == 0x0A;
             }
 
             // ROM Bank Number (lower 5 bits)
             ROM_BANK_NUM_START..=ROM_BANK_NUM_END => {
+                let (_, banks, _) = self.get_rom_size().unwrap_or((0, 1, 0));
                 let value = value & 0x1F;
+                let value = if value > (banks - 1) as u8 {
+                    value % banks as u8
+                } else {
+                    value
+                };
                 self.rom_bank = if value == 0x00 { 0x01 } else { value }
             }
 
@@ -177,7 +195,7 @@ impl MemoryBankController for MBC1 {
 
             // RAM Write
             RAM_BANK_START..=RAM_BANK_END => {
-                if !self.ram_enabled {
+                if !self.ram_enabled || self.ram.is_empty() {
                     return;
                 }
 

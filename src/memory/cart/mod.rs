@@ -1,6 +1,9 @@
 use std::fmt::{Debug, Display};
 
-use crate::memory::{cart::MapperType::None, controller, memory_sizes};
+use crate::memory::{
+    cart::{MapperType::None, cart_header::addresses},
+    controller, memory_sizes,
+};
 
 use super::controller::MemoryBankController;
 use cart_header::{
@@ -68,11 +71,11 @@ impl Debug for Cart {
 impl Cart {
     pub fn new(data: &[u8]) -> Result<Self, CartError> {
         let mut title: Vec<char> = vec![];
-        let rom_code = data.get(0x0148);
+        let rom_code = data.get(addresses::ROM_SIZE as usize);
         let rom_code = if let Some(&code) = rom_code {
             code
         } else {
-            return Err(CartError::InvalidHeaderLocation(0x0148));
+            return Err(CartError::InvalidHeaderLocation(addresses::ROM_SIZE));
         };
         let (rom_size, rom_banks) = get_rom_size(&rom_code)?;
         let mut rom = vec![0; rom_size as usize];
@@ -88,7 +91,7 @@ impl Cart {
             title.insert(title.len(), char::from(*byte));
         }
 
-        let (ram_size, ram_banks) = get_ram_size(&rom[0x0149])?;
+        let (ram_size, ram_banks) = get_ram_size(&rom[addresses::RAM_SIZE as usize])?;
 
         // Validate header checksum
         validate_header_checksum(&rom)?;
