@@ -186,25 +186,25 @@ mod cpu_tests {
     #[test]
     fn test_arithmetic_operations() {
         // Test addition helper
-        let (result, carry, half_carry) = Cpu::addition(&0x0F, &0x01);
+        let (result, carry, half_carry) = Cpu::add_u8(&0x0F, &0x01);
         assert_eq!(result, 0x10);
         assert!(!carry);
         assert!(half_carry);
 
         // Test overflow
-        let (result, carry, half_carry) = Cpu::addition(&0xFF, &0x01);
+        let (result, carry, half_carry) = Cpu::add_u8(&0xFF, &0x01);
         assert_eq!(result, 0x00);
         assert!(carry);
         assert!(half_carry);
 
         // Test subtraction helper
-        let (result, borrow, half_borrow) = Cpu::subtract(&0x10, &0x01);
+        let (result, borrow, half_borrow) = Cpu::sub_u8(&0x10, &0x01);
         assert_eq!(result, 0x0F);
         assert!(!borrow);
         assert!(half_borrow); // 0x0 < 0x1, so borrow needed
 
         // Test underflow
-        let (result, borrow, half_borrow) = Cpu::subtract(&0x00, &0x01);
+        let (result, borrow, half_borrow) = Cpu::sub_u8(&0x00, &0x01);
         assert_eq!(result, 0xFF);
         assert!(borrow);
         assert!(half_borrow);

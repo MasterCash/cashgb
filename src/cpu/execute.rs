@@ -21,7 +21,7 @@ impl Cpu {
             }
         };
 
-        let (result, c, h) = Self::subtract(&self.register.get_a(), &value);
+        let (result, c, h) = Self::sub_u8(&self.register.get_a(), &value);
         trace!(
             "Comparing: {} - {} = {}",
             self.register.get_a(),
@@ -72,9 +72,15 @@ impl Cpu {
             }
             LoadSource::HL => self.register.get_hl(),
             LoadSource::SPE => {
-                let e = self.read(&self.program_counter) as i8;
+                let e = self.read(&self.program_counter);
                 self.program_counter = self.program_counter.wrapping_add(1);
-                (self.stack_pointer as i16 + e as i16) as u16
+                // H and C come from the unsigned low byte addition, even for negative offsets
+                let (_, c, h) = Self::add_u8(&(self.stack_pointer as u8), &e);
+                self.update_flag(Flag::Z, false);
+                self.update_flag(Flag::N, false);
+                self.update_flag(Flag::H, h);
+                self.update_flag(Flag::C, c);
+                self.stack_pointer.wrapping_add_signed(e as i8 as i16)
             }
             LoadSource::BCAddr => self.read(&self.register.get_bc()) as u16,
             LoadSource::DEAddr => self.read(&self.register.get_de()) as u16,
@@ -177,7 +183,7 @@ impl Cpu {
         let value = self.get_bitwise_source(source);
         let bit = 1 << pos;
         let value = value | bit;
-        // self.set_bitwise_source(source, value);
+        self.set_bitwise_source(source, value);
     }
 
     pub(super) fn jump_relative(&mut self, condition: JumpCondition) {
@@ -253,49 +259,49 @@ impl Cpu {
                 self.stack_pointer = result;
             }
             IncrementTarget::B => {
-                let (results, _, h) = Self::addition(&self.register.get_b(), &1);
+                let (results, _, h) = Self::add_u8(&self.register.get_b(), &1);
                 self.register.set_b(results);
                 self.update_flag(Flag::Z, results == 0);
                 self.clear_flag(Flag::N);
                 self.update_flag(Flag::H, h);
             }
             IncrementTarget::D => {
-                let (results, _, h) = Self::addition(&self.register.get_d(), &1);
+                let (results, _, h) = Self::add_u8(&self.register.get_d(), &1);
                 self.register.set_d(results);
                 self.update_flag(Flag::Z, results == 0);
                 self.clear_flag(Flag::N);
                 self.update_flag(Flag::H, h);
             }
             IncrementTarget::H => {
-                let (results, _, h) = Self::addition(&self.register.get_h(), &1);
+                let (results, _, h) = Self::add_u8(&self.register.get_h(), &1);
                 self.register.set_h(results);
                 self.update_flag(Flag::Z, results == 0);
                 self.clear_flag(Flag::N);
                 self.update_flag(Flag::H, h);
             }
             IncrementTarget::C => {
-                let (results, _, h) = Self::addition(&self.register.get_c(), &1);
+                let (results, _, h) = Self::add_u8(&self.register.get_c(), &1);
                 self.register.set_c(results);
                 self.update_flag(Flag::Z, results == 0);
                 self.clear_flag(Flag::N);
                 self.update_flag(Flag::H, h);
             }
             IncrementTarget::E => {
-                let (results, _, h) = Self::addition(&self.register.get_e(), &1);
+                let (results, _, h) = Self::add_u8(&self.register.get_e(), &1);
                 self.register.set_e(results);
                 self.update_flag(Flag::Z, results == 0);
                 self.clear_flag(Flag::N);
                 self.update_flag(Flag::H, h);
             }
             IncrementTarget::L => {
-                let (results, _, h) = Self::addition(&self.register.get_l(), &1);
+                let (results, _, h) = Self::add_u8(&self.register.get_l(), &1);
                 self.register.set_l(results);
                 self.update_flag(Flag::Z, results == 0);
                 self.clear_flag(Flag::N);
                 self.update_flag(Flag::H, h);
             }
             IncrementTarget::A => {
-                let (results, _, h) = Self::addition(&self.register.get_a(), &1);
+                let (results, _, h) = Self::add_u8(&self.register.get_a(), &1);
                 self.register.set_a(results);
                 self.update_flag(Flag::Z, results == 0);
                 self.clear_flag(Flag::N);
@@ -303,7 +309,7 @@ impl Cpu {
             }
             IncrementTarget::HLAddr => {
                 let addr = self.register.get_hl();
-                let (results, _, h) = Self::addition(&self.read(&addr), &1);
+                let (results, _, h) = Self::add_u8(&self.read(&addr), &1);
                 self.write(&addr, results);
                 self.update_flag(Flag::Z, results == 0);
                 self.clear_flag(Flag::N);
@@ -356,7 +362,7 @@ impl Cpu {
             }
             SubtractSource::HLAddr => self.read(&self.register.get_hl()),
         };
-        let (result, c, h) = Self::subtract(&self.register.get_a(), &source);
+        let (result, c, h) = Self::sub_u8(&self.register.get_a(), &source);
 
         self.register.set_a(result);
         self.update_flag(Flag::C, c);
@@ -379,10 +385,16 @@ impl Cpu {
         let sp = self.stack_pointer;
         self.write(&sp, lsb);
     }
-    pub(super) fn rotate_left(&mut self, source: BitwiseSource) {
-        let c = self.get_bitwise_source(source) >> 7;
-        self.set_bitwise_source(source, c << 1);
-        self.update_flag(Flag::C, c == 1);
+    pub(super) fn rotate_left(&mut self, source: BitwiseSource, set_z: bool) {
+        self.rotate(source, |cpu: &mut Cpu, value: u8| {
+            let last = value >> 7;
+            let n = (value << 1) | cpu.get_flag(Flag::C) as u8;
+            cpu.update_flag(Flag::C, last == 0x01);
+            cpu.update_flag(Flag::Z, n == 0 && set_z);
+            cpu.clear_flag(Flag::H);
+            cpu.clear_flag(Flag::N);
+            n
+        })
     }
     pub(super) fn pop(&mut self, target: PopTarget) {
         let n = self.read(&self.stack_pointer) as u16;
@@ -394,7 +406,8 @@ impl Cpu {
             PopTarget::BC => self.register.set_bc(n),
             PopTarget::DE => self.register.set_de(n),
             PopTarget::HL => self.register.set_hl(n),
-            PopTarget::AF => self.register.set_af(n),
+            // The low nibble of F doesn't exist in hardware and always reads 0
+            PopTarget::AF => self.register.set_af(n & 0xFFF0),
         };
     }
     pub(super) fn decrement(&mut self, target: DecrementTarget) {
@@ -416,49 +429,49 @@ impl Cpu {
                 self.stack_pointer = result;
             }
             DecrementTarget::B => {
-                let (results, _, h) = Self::subtract(&self.register.get_b(), &1);
+                let (results, _, h) = Self::sub_u8(&self.register.get_b(), &1);
                 self.register.set_b(results);
                 self.update_flag(Flag::Z, results == 0);
                 self.set_flag(Flag::N);
                 self.update_flag(Flag::H, h);
             }
             DecrementTarget::D => {
-                let (results, _, h) = Self::subtract(&self.register.get_d(), &1);
+                let (results, _, h) = Self::sub_u8(&self.register.get_d(), &1);
                 self.register.set_d(results);
                 self.update_flag(Flag::Z, results == 0);
                 self.set_flag(Flag::N);
                 self.update_flag(Flag::H, h);
             }
             DecrementTarget::H => {
-                let (results, _, h) = Self::subtract(&self.register.get_h(), &1);
+                let (results, _, h) = Self::sub_u8(&self.register.get_h(), &1);
                 self.register.set_h(results);
                 self.update_flag(Flag::Z, results == 0);
                 self.set_flag(Flag::N);
                 self.update_flag(Flag::H, h);
             }
             DecrementTarget::C => {
-                let (results, _, h) = Self::subtract(&self.register.get_c(), &1);
+                let (results, _, h) = Self::sub_u8(&self.register.get_c(), &1);
                 self.register.set_c(results);
                 self.update_flag(Flag::Z, results == 0);
                 self.set_flag(Flag::N);
                 self.update_flag(Flag::H, h);
             }
             DecrementTarget::E => {
-                let (results, _, h) = Self::subtract(&self.register.get_e(), &1);
+                let (results, _, h) = Self::sub_u8(&self.register.get_e(), &1);
                 self.register.set_e(results);
                 self.update_flag(Flag::Z, results == 0);
                 self.set_flag(Flag::N);
                 self.update_flag(Flag::H, h);
             }
             DecrementTarget::L => {
-                let (results, _, h) = Self::subtract(&self.register.get_l(), &1);
+                let (results, _, h) = Self::sub_u8(&self.register.get_l(), &1);
                 self.register.set_l(results);
                 self.update_flag(Flag::Z, results == 0);
                 self.set_flag(Flag::N);
                 self.update_flag(Flag::H, h);
             }
             DecrementTarget::A => {
-                let (results, _, h) = Self::subtract(&self.register.get_a(), &1);
+                let (results, _, h) = Self::sub_u8(&self.register.get_a(), &1);
                 self.register.set_a(results);
                 self.update_flag(Flag::Z, results == 0);
                 self.set_flag(Flag::N);
@@ -466,7 +479,7 @@ impl Cpu {
             }
             DecrementTarget::HLAddr => {
                 let addr = self.register.get_hl();
-                let (results, _, h) = Self::subtract(&self.read(&addr), &1);
+                let (results, _, h) = Self::sub_u8(&self.read(&addr), &1);
                 self.write(&addr, results);
                 self.update_flag(Flag::Z, results == 0);
                 self.set_flag(Flag::N);
@@ -497,22 +510,17 @@ impl Cpu {
 
         match target {
             AddTarget::SP => {
-                let n = source as i8;
-                let (result, _) = self.stack_pointer.overflowing_add_signed(n as i16);
-                self.update_flag(
-                    Flag::H,
-                    (result as i16 ^ self.stack_pointer as i16 ^ n as i16) & 0x10 == 0x10,
-                );
-                self.update_flag(
-                    Flag::C,
-                    (result as i16 ^ self.stack_pointer as i16 ^ n as i16) & 0x100 == 0x100,
-                );
+                // H and C come from the unsigned low byte addition, even for negative offsets
+                let e = source as u8;
+                let (_, c, h) = Self::add_u8(&(self.stack_pointer as u8), &e);
+                self.update_flag(Flag::H, h);
+                self.update_flag(Flag::C, c);
                 self.clear_flag(Flag::Z);
                 self.clear_flag(Flag::N);
-                self.stack_pointer = result;
+                self.stack_pointer = self.stack_pointer.wrapping_add_signed(e as i8 as i16);
             }
             AddTarget::A => {
-                let (result, c, h) = Self::addition(&self.register.get_a(), &(source as u8));
+                let (result, c, h) = Self::add_u8(&self.register.get_a(), &(source as u8));
                 self.register.set_a(result);
                 self.update_flag(Flag::C, c);
                 self.update_flag(Flag::H, h);
@@ -520,12 +528,10 @@ impl Cpu {
                 self.clear_flag(Flag::N);
             }
             AddTarget::HL => {
-                let (result, c) = self.register.get_hl().overflowing_add(source);
-                let h = (result ^ self.register.get_hl() ^ source) & 0x1000 == 0x1000;
+                let (result, c, h) = Self::add_u16(&self.register.get_hl(), &source);
                 self.update_flag(Flag::C, c);
                 self.update_flag(Flag::H, h);
                 self.register.set_hl(result);
-                self.clear_flag(Flag::Z);
                 self.clear_flag(Flag::N);
             }
         };
@@ -546,8 +552,8 @@ impl Cpu {
             AddCarrySource::L => self.register.get_l(),
             AddCarrySource::HLAddr => self.read(&self.register.get_hl()),
         };
-        let (source, s_c, s_h) = Self::addition(&source, &(self.get_flag(Flag::C) as u8));
-        let (result, c, h) = Self::addition(&self.register.get_a(), &source);
+        let (source, s_c, s_h) = Self::add_u8(&source, &(self.get_flag(Flag::C) as u8));
+        let (result, c, h) = Self::add_u8(&self.register.get_a(), &source);
         self.register.set_a(result);
         self.update_flag(Flag::C, c || s_c);
         self.update_flag(Flag::H, h || s_h);
@@ -724,13 +730,13 @@ impl Cpu {
             SubtractCarrySource::L => self.register.get_l(),
             SubtractCarrySource::HLAddr => self.read(&self.register.get_hl()),
         };
-        let source = source + self.get_flag(Flag::C) as u8;
-
-        let (result, c, h) = Self::subtract(&self.register.get_a(), &source);
+        // Subtract source first, then the carry: a borrow in either step is a borrow overall
+        let (partial, p_c, p_h) = Self::sub_u8(&self.register.get_a(), &source);
+        let (result, c, h) = Self::sub_u8(&partial, &(self.get_flag(Flag::C) as u8));
 
         self.register.set_a(result);
-        self.update_flag(Flag::C, c);
-        self.update_flag(Flag::H, h);
+        self.update_flag(Flag::C, c || p_c);
+        self.update_flag(Flag::H, h || p_h);
         self.update_flag(Flag::Z, result == 0);
         self.set_flag(Flag::N);
     }

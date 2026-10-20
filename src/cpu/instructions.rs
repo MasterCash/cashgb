@@ -263,14 +263,14 @@ pub enum Instruction {
     LoadAccumulator(LoadAccumulatorTarget, LoadAccumulatorSource),
     Increment(IncrementTarget),
     Decrement(DecrementTarget),
-    RotateLeftCircular(BitwiseSource),
-    RotateLeft(BitwiseSource),
+    RotateLeftCircular(BitwiseSource, bool),
+    RotateLeft(BitwiseSource, bool),
     DecimalAdjustAccumulator,
     SetCarryFlag,
     JumpRelative(JumpCondition),
     Compare(CompareSource),
-    RotateRightCircular(BitwiseSource),
-    RotateRight(BitwiseSource),
+    RotateRightCircular(BitwiseSource, bool),
+    RotateRight(BitwiseSource, bool),
     ShiftRightArithmetic(BitwiseSource),
     ShiftRightLogical(BitwiseSource),
     ShiftLeftArithmetic(BitwiseSource),
@@ -310,14 +310,14 @@ impl Display for Instruction {
             Instruction::LoadAccumulator(t, s) => write!(f, "LDH {:?}, {:?}", t, s),
             Instruction::Increment(s) => write!(f, "INC {:?}", s),
             Instruction::Decrement(s) => write!(f, "DEC {:?}", s),
-            Instruction::RotateLeftCircular(s) => write!(f, "RLC {:?}", s),
-            Instruction::RotateLeft(s) => write!(f, "RL {:?}", s),
+            Instruction::RotateLeftCircular(s, _) => write!(f, "RLC {:?}", s),
+            Instruction::RotateLeft(s, _) => write!(f, "RL {:?}", s),
             Instruction::DecimalAdjustAccumulator => write!(f, "DAA"),
             Instruction::SetCarryFlag => write!(f, "SCF"),
             Instruction::JumpRelative(c) => write!(f, "JR {:?}, e", c),
             Instruction::Compare(s) => write!(f, "CP {:?}", s),
-            Instruction::RotateRightCircular(s) => write!(f, "RRC {:?}", s),
-            Instruction::RotateRight(s) => write!(f, "RR {:?}", s),
+            Instruction::RotateRightCircular(s, _) => write!(f, "RRC {:?}", s),
+            Instruction::RotateRight(s, _) => write!(f, "RR {:?}", s),
             Instruction::ComplementAccumulator => write!(f, "CPL"),
             Instruction::ComplementCarryFlag => write!(f, "CCF"),
             Instruction::Return(c) => write!(f, "RET {:?}", c),
@@ -446,8 +446,8 @@ impl Instruction {
 
                 Ok((Instruction::Load(target, LoadSource::PC), duration))
             }
-            0x07 => Ok((Instruction::RotateLeftCircular(BitwiseSource::A), 1)),
-            0x17 => Ok((Instruction::RotateLeft(BitwiseSource::A), 1)),
+            0x07 => Ok((Instruction::RotateLeftCircular(BitwiseSource::A, false), 1)),
+            0x17 => Ok((Instruction::RotateLeft(BitwiseSource::A, false), 1)),
             0x27 => Ok((Instruction::DecimalAdjustAccumulator, 1)),
             0x37 => Ok((Instruction::SetCarryFlag, 1)),
             0x08 => Ok((Instruction::Load(LoadTarget::PC16Addr, LoadSource::SP), 5)),
@@ -527,8 +527,8 @@ impl Instruction {
 
                 Ok((Instruction::Load(target, LoadSource::PC), 2))
             }
-            0x0f => Ok((Instruction::RotateRightCircular(BitwiseSource::A), 1)),
-            0x1f => Ok((Instruction::RotateRight(BitwiseSource::A), 1)),
+            0x0f => Ok((Instruction::RotateRightCircular(BitwiseSource::A, false), 1)),
+            0x1f => Ok((Instruction::RotateRight(BitwiseSource::A, false), 1)),
             0x2f => Ok((Instruction::ComplementAccumulator, 1)),
             0x3f => Ok((Instruction::ComplementCarryFlag, 1)),
             0x40..=0x75 | 0x77..=0x7f => {
@@ -834,10 +834,10 @@ impl Instruction {
             1
         };
         match byte {
-            0x00..=0x07 => (Instruction::RotateLeftCircular(source), cycles),
-            0x08..=0x0f => (Instruction::RotateRightCircular(source), cycles),
-            0x10..=0x17 => (Instruction::RotateLeft(source), cycles),
-            0x18..=0x1f => (Instruction::RotateRight(source), cycles),
+            0x00..=0x07 => (Instruction::RotateLeftCircular(source, true), cycles),
+            0x08..=0x0f => (Instruction::RotateRightCircular(source, true), cycles),
+            0x10..=0x17 => (Instruction::RotateLeft(source, true), cycles),
+            0x18..=0x1f => (Instruction::RotateRight(source, true), cycles),
             0x20..=0x27 => (Instruction::ShiftLeftArithmetic(source), cycles),
             0x28..=0x2f => (Instruction::ShiftRightArithmetic(source), cycles),
             0x30..=0x37 => (Instruction::Swap(source), cycles),
@@ -866,7 +866,6 @@ impl Instruction {
             0xe8..=0xef => (Instruction::SET(5, source), cycles),
             0xf0..=0xf7 => (Instruction::SET(6, source), cycles),
             0xf8..=0xff => (Instruction::SET(7, source), cycles),
-            _ => panic!("Unknown Instruction: {:#x}", byte),
         }
     }
 }

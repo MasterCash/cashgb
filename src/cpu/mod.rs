@@ -206,7 +206,7 @@ impl Cpu {
             Instruction::Subtract(source) => self.sub(source),
             Instruction::Nop => (),
             Instruction::Push(target) => self.push(target),
-            Instruction::RotateLeft(source) => self.rotate_left(source),
+            Instruction::RotateLeft(source, set_z) => self.rotate_left(source, set_z),
             Instruction::Pop(target) => self.pop(target),
             Instruction::Decrement(target) => self.decrement(target),
             Instruction::Add(target, source) => self.add(target, source),
@@ -227,35 +227,37 @@ impl Cpu {
                 self.ret(JumpCondition::None);
                 self.ime = true;
             }
-            Instruction::RotateLeftCircular(source) => {
+            Instruction::RotateLeftCircular(source, set_z) => {
                 self.rotate(source, |cpu: &mut Cpu, value: u8| {
                     let last = value >> 7;
                     let n = value.rotate_left(1);
                     cpu.update_flag(Flag::C, last == 0x01);
-                    cpu.update_flag(Flag::Z, n == 0);
+                    cpu.update_flag(Flag::Z, n == 0 && set_z);
                     cpu.clear_flag(Flag::H);
                     cpu.clear_flag(Flag::N);
                     n
                 })
             }
-            Instruction::RotateRight(source) => self.rotate(source, |cpu: &mut Cpu, value: u8| {
-                let last = value & 0x01;
-                let mut n = value >> 1;
-                if cpu.get_flag(Flag::C) {
-                    n |= 1u8 << 7;
-                }
-                cpu.update_flag(Flag::C, last == 0x01);
-                cpu.update_flag(Flag::Z, n == 0);
-                cpu.clear_flag(Flag::H);
-                cpu.clear_flag(Flag::N);
-                n
-            }),
-            Instruction::RotateRightCircular(source) => {
+            Instruction::RotateRight(source, set_z) => {
+                self.rotate(source, |cpu: &mut Cpu, value: u8| {
+                    let last = value & 0x01;
+                    let mut n = value >> 1;
+                    if cpu.get_flag(Flag::C) {
+                        n |= 1u8 << 7;
+                    }
+                    cpu.update_flag(Flag::C, last == 0x01);
+                    cpu.update_flag(Flag::Z, n == 0 && set_z);
+                    cpu.clear_flag(Flag::H);
+                    cpu.clear_flag(Flag::N);
+                    n
+                })
+            }
+            Instruction::RotateRightCircular(source, set_z) => {
                 self.rotate(source, |cpu: &mut Cpu, value: u8| {
                     let last = value & 0x01;
                     let n = value.rotate_right(1);
                     cpu.update_flag(Flag::C, last == 0x01);
-                    cpu.update_flag(Flag::Z, n == 0);
+                    cpu.update_flag(Flag::Z, n == 0 && set_z);
                     cpu.clear_flag(Flag::H);
                     cpu.clear_flag(Flag::N);
                     n
@@ -330,17 +332,24 @@ impl Cpu {
         self.register.get_f() & flag as u8 == flag as u8
     }
 
+    pub(crate) fn add_u16(a: &u16, b: &u16) -> (u16, bool, bool) {
+        let (results, overflow) = a.overflowing_add(*b);
+        // Half-carry: set if carry from bit 11 to bit 12
+        let half_carry = ((a & 0xFFF) + (b & 0xFFF)) >= 0x1000;
+        // Carry: set if overflow occurred
+        (results, overflow, half_carry)
+    }
     // Helper math operations
-    pub(crate) fn addition(a: &u8, b: &u8) -> (u8, bool, bool) {
+    pub(crate) fn add_u8(a: &u8, b: &u8) -> (u8, bool, bool) {
         let (results, overflow) = a.overflowing_add(*b);
         // Half-carry: set if carry from bit 3 to bit 4
-        let half_carry = ((a & 0xF) + (b & 0xF)) & 0x10 == 0x10;
+        let half_carry = (((a & 0xF) + (b & 0xF)) & 0x10) == 0x10;
         (results, overflow, half_carry)
     }
 
-    pub(crate) fn subtract(a: &u8, b: &u8) -> (u8, bool, bool) {
+    pub(crate) fn sub_u8(a: &u8, b: &u8) -> (u8, bool, bool) {
         let (results, overflow) = a.overflowing_sub(*b);
-        // Half-carry: set if borrow from bit 4 to bit 3 (when lower nibble of a < lower nibble of b)
+        // Half-carry: set if borrow from bit 4 into bit 3 (lower nibble of a < lower nibble of b)
         let half_carry = (a & 0xF) < (b & 0xF);
         (results, overflow, half_carry)
     }
