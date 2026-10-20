@@ -380,4 +380,35 @@ impl Ppu {
     pub fn get_current_mode(&self) -> LcdMode {
         self.mode
     }
+
+    /// Write a PPU register (0xFF40-0xFF4B), applying LCD enable/disable side effects.
+    pub fn write_register(&mut self, addr: u16, value: u8) {
+        let was_enabled = self.registers.is_lcd_enabled();
+        self.registers.write_register(addr, value);
+        let is_enabled = self.registers.is_lcd_enabled();
+
+        if was_enabled && !is_enabled {
+            self.disable_lcd();
+        } else if !was_enabled && is_enabled {
+            self.enable_lcd();
+        }
+    }
+
+    /// LCD off: LY resets to 0, mode reads 0 (HBlank) and VRAM/OAM are freely accessible.
+    fn disable_lcd(&mut self) {
+        self.dots = 0;
+        self.scanline = 0;
+        self.registers.set_ly(0);
+        self.mode = LcdMode::HBlank;
+        self.registers.set_mode(LcdMode::HBlank);
+    }
+
+    /// LCD on: start a fresh frame at line 0.
+    fn enable_lcd(&mut self) {
+        self.dots = 0;
+        self.scanline = 0;
+        self.registers.set_ly(0);
+        self.mode = LcdMode::OamScan;
+        self.registers.set_mode(LcdMode::OamScan);
+    }
 }

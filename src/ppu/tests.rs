@@ -326,4 +326,77 @@ mod tests {
 
         assert_eq!(frame_count, 2);
     }
+
+    #[test]
+    fn test_lcd_disable_resets_ly_and_mode() {
+        let mut ppu = create_test_ppu();
+        ppu.scanline = 50;
+        ppu.registers.set_ly(50);
+        ppu.dots = 100;
+        ppu.mode = LcdMode::Drawing;
+        ppu.registers.set_mode(LcdMode::Drawing);
+
+        ppu.write_register(0xFF40, 0x00);
+
+        assert_eq!(ppu.scanline, 0);
+        assert_eq!(ppu.registers.get_ly(), 0);
+        assert_eq!(ppu.dots, 0);
+        assert_eq!(ppu.get_current_mode(), LcdMode::HBlank);
+        assert_eq!(ppu.registers.read_stat() & 0x03, LcdMode::HBlank as u8);
+    }
+
+    #[test]
+    fn test_lcd_disable_unlocks_vram_and_oam() {
+        let mut ppu = create_test_ppu();
+        ppu.mode = LcdMode::Drawing;
+
+        ppu.write_register(0xFF40, 0x00);
+        ppu.write_vram(0x8000, 0x11);
+        ppu.write_oam(0xFE00, 0x22);
+
+        assert_eq!(ppu.read_vram(0x8000), 0x11);
+        assert_eq!(ppu.read_oam(0xFE00), 0x22);
+    }
+
+    #[test]
+    fn test_lcd_disabled_ppu_does_not_advance() {
+        let mut ppu = create_test_ppu();
+        ppu.write_register(0xFF40, 0x00);
+
+        for _ in 0..1000 {
+            assert_eq!(ppu.step(4), None);
+        }
+
+        assert_eq!(ppu.registers.get_ly(), 0);
+        assert_eq!(ppu.get_current_mode(), LcdMode::HBlank);
+    }
+
+    #[test]
+    fn test_lcd_enable_starts_fresh_frame() {
+        let mut ppu = create_test_ppu();
+        ppu.write_register(0xFF40, 0x00);
+        ppu.dots = 30;
+
+        ppu.write_register(0xFF40, 0x91);
+
+        assert_eq!(ppu.scanline, 0);
+        assert_eq!(ppu.registers.get_ly(), 0);
+        assert_eq!(ppu.dots, 0);
+        assert_eq!(ppu.get_current_mode(), LcdMode::OamScan);
+    }
+
+    #[test]
+    fn test_lcdc_write_without_enable_change_keeps_state() {
+        let mut ppu = create_test_ppu();
+        ppu.write_register(0xFF40, 0x91);
+        ppu.scanline = 10;
+        ppu.dots = 40;
+        ppu.mode = LcdMode::HBlank;
+
+        ppu.write_register(0xFF40, 0x93); // still enabled, only sprites toggled
+
+        assert_eq!(ppu.scanline, 10);
+        assert_eq!(ppu.dots, 40);
+        assert_eq!(ppu.get_current_mode(), LcdMode::HBlank);
+    }
 }

@@ -1,3 +1,4 @@
+use core::error;
 use log::error;
 use std::fmt::Display;
 
@@ -364,8 +365,18 @@ pub enum Flag {
     C = 1 << 4,
 }
 
+#[derive(Debug)]
+pub struct UnknownInstruction;
+
+impl Display for UnknownInstruction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Unknown Instruction")
+    }
+}
+impl error::Error for UnknownInstruction {}
+
 impl Instruction {
-    pub fn get_instruction(byte: &u8) -> Result<(Instruction, u8), ()> {
+    pub fn get_instruction(byte: &u8) -> Result<(Instruction, u8), UnknownInstruction> {
         match byte {
             0x00 => Ok((Instruction::Nop, 1)),
             0x10 => Ok((Instruction::Stop, 2)),
@@ -800,7 +811,7 @@ impl Instruction {
             0xff => Ok((Instruction::Restart(0x38), 4)),
             _ => {
                 error!("Unknown Instruction Code: {:#x}", byte);
-                Err(())
+                Err(UnknownInstruction)
             }
         }
     }
