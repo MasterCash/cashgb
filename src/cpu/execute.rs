@@ -173,11 +173,18 @@ impl Cpu {
         self.set_bitwise_source(source, value);
     }
 
+    pub(super) fn set(&mut self, pos: u8, source: BitwiseSource) {
+        let value = self.get_bitwise_source(source);
+        let bit = 1 << pos;
+        let value = value | bit;
+        // self.set_bitwise_source(source, value);
+    }
+
     pub(super) fn jump_relative(&mut self, condition: JumpCondition) {
         if condition == JumpCondition::None {
             let e = self.read(&self.program_counter) as i8;
             self.program_counter = self.program_counter.wrapping_add(1);
-            self.program_counter = (self.program_counter as i16 + e as i16) as u16;
+            self.program_counter = self.program_counter.wrapping_add_signed(e as i16);
             trace!("jump to: {:#x}", self.program_counter);
             return;
         }
@@ -330,7 +337,7 @@ impl Cpu {
             self.instruction = Instruction::Call(JumpCondition::None);
             self.step_count = 3;
         } else {
-            self.program_counter = self.program_counter.wrapping_add(3);
+            self.program_counter = self.program_counter.wrapping_add(2);
         }
     }
     pub(super) fn sub(&mut self, source: SubtractSource) {
@@ -539,11 +546,11 @@ impl Cpu {
             AddCarrySource::L => self.register.get_l(),
             AddCarrySource::HLAddr => self.read(&self.register.get_hl()),
         };
-        let source = source + self.get_flag(Flag::C) as u8;
+        let (source, s_c, s_h) = Self::addition(&source, &(self.get_flag(Flag::C) as u8));
         let (result, c, h) = Self::addition(&self.register.get_a(), &source);
         self.register.set_a(result);
-        self.update_flag(Flag::C, c);
-        self.update_flag(Flag::H, h);
+        self.update_flag(Flag::C, c || s_c);
+        self.update_flag(Flag::H, h || s_h);
         self.update_flag(Flag::Z, result == 0);
         self.clear_flag(Flag::N);
     }

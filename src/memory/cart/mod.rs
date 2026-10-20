@@ -68,7 +68,13 @@ impl Debug for Cart {
 impl Cart {
     pub fn new(data: &[u8]) -> Result<Self, CartError> {
         let mut title: Vec<char> = vec![];
-        let (rom_size, rom_banks) = get_rom_size(&data[0x0148])?;
+        let rom_code = data.get(0x0148);
+        let rom_code = if let Some(&code) = rom_code {
+            code
+        } else {
+            return Err(CartError::InvalidHeaderLocation(0x0148));
+        };
+        let (rom_size, rom_banks) = get_rom_size(&rom_code)?;
         let mut rom = vec![0; rom_size as usize];
 
         for (i, byte) in data.iter().enumerate() {

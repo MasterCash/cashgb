@@ -6,7 +6,7 @@ pub mod registers;
 mod tests;
 
 use crate::{
-    cpu::instructions::Instruction::Nop,
+    cpu::{instructions::Instruction::Nop, registers::TimerRegister},
     memory::{MemoryBus, cart::Cart},
 };
 use instructions::*;
@@ -23,6 +23,7 @@ pub struct Cpu {
     pub(crate) instruction: Instruction,
     pub(crate) ime: bool,
     pub(crate) ime_next: bool,
+    pub(crate) timer_register: TimerRegister,
 }
 
 impl Cpu {
@@ -41,29 +42,40 @@ impl Cpu {
             return;
         }
 
+        if let Some(interrupt) = self.timer_register.step() {
+            self.request_interrupt(interrupt);
+        }
+
         // Step PPU (assuming 4 cycles per CPU step for timing)
         if let Some(interrupt) = self.memory.step_ppu(4) {
-            self.memory.request_interrupt(interrupt);
-        }
-
-        // handle interrupts (this can wake up from HALT)
-        self.handle_interrupts();
-
-        if self.ime_next {
-            self.ime = true;
-            self.ime_next = false;
-        }
-
-        // If CPU is halted and no interrupt woke it up, don't process instructions
-        if self.status == CpuStatus::Halted {
-            return;
+            self.request_interrupt(interrupt);
         }
 
         // handle instructions
         if self.step_count == 0 {
-            (self.instruction, self.step_count) =
-                Instruction::get_instruction(&self.memory.read(self.program_counter));
-            self.program_counter = self.program_counter.wrapping_add(1);
+            // handle interrupts (this can wake up from HALT)
+            self.handle_interrupts();
+
+            if self.ime_next {
+                self.ime = true;
+                self.ime_next = false;
+            }
+
+            // If CPU is halted and no interrupt woke it up, don't process instructions
+            if self.status == CpuStatus::Halted {
+                return;
+            }
+
+            if let Ok((instruction, step_count)) =
+                Instruction::get_instruction(&self.memory.read(self.program_counter))
+            {
+                self.instruction = instruction;
+                self.step_count = step_count;
+                self.program_counter = self.program_counter.wrapping_add(1);
+            } else {
+                self.status = CpuStatus::Errored;
+                return;
+            }
         }
         if self.step_count > 1 {
             self.step_count -= 1;
@@ -84,6 +96,7 @@ impl Cpu {
             program_counter: 0x000,
             stack_pointer: 0xFFFF,
             register: Register::new(),
+            timer_register: TimerRegister::new(),
         };
 
         cpu.reset();
@@ -100,6 +113,7 @@ impl Cpu {
             instruction: Nop,
             ime: false,
             ime_next: false,
+            timer_register: TimerRegister::new(),
         }
     }
 
@@ -153,12 +167,18 @@ impl Cpu {
     }
 
     pub(crate) fn write(&mut self, addr: &u16, value: u8) {
+        self.timer_register.write(*addr, value);
+
         if let Some(new_status) = self.memory.write(*addr, value) {
             self.status = new_status;
         }
     }
 
     pub(crate) fn read(&self, addr: &u16) -> u8 {
+        if let Some(value) = self.timer_register.read(*addr) {
+            return value;
+        }
+
         self.memory.read(*addr)
     }
 
@@ -285,6 +305,7 @@ impl Cpu {
             Instruction::Or(source) => self.or(source),
             Instruction::Jump(condition) => self.jump(condition),
             Instruction::RES(pos, source) => self.res(pos, source),
+            Instruction::SET(pos, source) => self.set(pos, source),
         }
     }
 
@@ -389,6 +410,8 @@ impl Cpu {
             Interrupt::Serial => 0x0058,
             Interrupt::Joypad => 0x0060,
         };
+
+        self.step_count = 5;
 
         debug!(
             "Handling interrupt: {:?} -> {:#06X}",

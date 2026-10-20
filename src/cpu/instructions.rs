@@ -1,3 +1,4 @@
+use log::error;
 use std::fmt::Display;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -286,6 +287,7 @@ pub enum Instruction {
     Restart(u16),
     CB,
     RES(u8, BitwiseSource),
+    SET(u8, BitwiseSource),
 }
 
 impl Display for Instruction {
@@ -332,6 +334,7 @@ impl Display for Instruction {
             Instruction::Swap(s) => write!(f, "SWAP {:?}", s),
             Instruction::Bit(b, s) => write!(f, "BIT {:#x} {:?}", b, s),
             Instruction::RES(pos, s) => write!(f, "RES {:#x} {:?}", pos, s),
+            Instruction::SET(pos, s) => write!(f, "SET {:#x} {:?}", pos, s),
         }
     }
 }
@@ -362,10 +365,10 @@ pub enum Flag {
 }
 
 impl Instruction {
-    pub fn get_instruction(byte: &u8) -> (Instruction, u8) {
+    pub fn get_instruction(byte: &u8) -> Result<(Instruction, u8), ()> {
         match byte {
-            0x00 => (Instruction::Nop, 1),
-            0x10 => (Instruction::Stop, 2),
+            0x00 => Ok((Instruction::Nop, 1)),
+            0x10 => Ok((Instruction::Stop, 2)),
             0x01 | 0x11 | 0x21 | 0x31 => {
                 let target = match byte {
                     0x01 => LoadTarget::BC,
@@ -375,7 +378,7 @@ impl Instruction {
                     _ => panic!("Unreachable Instruction"),
                 };
 
-                (Instruction::Load(target, LoadSource::PC16), 3)
+                Ok((Instruction::Load(target, LoadSource::PC16), 3))
             }
             0x02 | 0x12 | 0x22 | 0x32 => {
                 let addr = match byte {
@@ -385,7 +388,7 @@ impl Instruction {
                     0x32 => LoadTarget::HLAddrDec,
                     _ => panic!("Unreachable Instruction"),
                 };
-                (Instruction::Load(addr, LoadSource::A), 2)
+                Ok((Instruction::Load(addr, LoadSource::A), 2))
             }
             0x03 | 0x13 | 0x23 | 0x33 => {
                 let target = match byte {
@@ -396,7 +399,7 @@ impl Instruction {
                     _ => panic!("Unreachable Instruction"),
                 };
 
-                (Instruction::Increment(target), 2)
+                Ok((Instruction::Increment(target), 2))
             }
             0x04 | 0x14 | 0x24 | 0x34 => {
                 let target = match byte {
@@ -407,7 +410,7 @@ impl Instruction {
                     _ => IncrementTarget::HLAddr,
                 };
                 let duration = if *byte == 0x34 { 2 } else { 1 };
-                (Instruction::Increment(target), duration)
+                Ok((Instruction::Increment(target), duration))
             }
             0x05 | 0x15 | 0x25 | 0x35 => {
                 let target = match byte {
@@ -418,25 +421,25 @@ impl Instruction {
                     _ => panic!("Unreachable Instruction"),
                 };
                 let duration = if *byte == 0x35 { 2 } else { 1 };
-                (Instruction::Decrement(target), duration)
+                Ok((Instruction::Decrement(target), duration))
             }
             0x06 | 0x16 | 0x26 | 0x36 => {
                 let target = match byte {
                     0x06 => LoadTarget::B,
                     0x16 => LoadTarget::D,
                     0x26 => LoadTarget::H,
-                    0x36 => LoadTarget::HL,
+                    0x36 => LoadTarget::HLAddr,
                     _ => panic!("Unreachable Instruction"),
                 };
                 let duration = if *byte == 0x36 { 3 } else { 2 };
 
-                (Instruction::Load(target, LoadSource::PC), duration)
+                Ok((Instruction::Load(target, LoadSource::PC), duration))
             }
-            0x07 => (Instruction::RotateLeftCircular(BitwiseSource::A), 1),
-            0x17 => (Instruction::RotateLeft(BitwiseSource::A), 1),
-            0x27 => (Instruction::DecimalAdjustAccumulator, 1),
-            0x37 => (Instruction::SetCarryFlag, 1),
-            0x08 => (Instruction::Load(LoadTarget::PC16Addr, LoadSource::SP), 5),
+            0x07 => Ok((Instruction::RotateLeftCircular(BitwiseSource::A), 1)),
+            0x17 => Ok((Instruction::RotateLeft(BitwiseSource::A), 1)),
+            0x27 => Ok((Instruction::DecimalAdjustAccumulator, 1)),
+            0x37 => Ok((Instruction::SetCarryFlag, 1)),
+            0x08 => Ok((Instruction::Load(LoadTarget::PC16Addr, LoadSource::SP), 5)),
             0x20 | 0x30 | 0x18 | 0x28 | 0x38 => {
                 let condition = match byte {
                     0x20 => JumpCondition::NZ,
@@ -446,7 +449,7 @@ impl Instruction {
                     0x38 => JumpCondition::C,
                     _ => panic!("Unreachable Instruction"),
                 };
-                (Instruction::JumpRelative(condition), 2)
+                Ok((Instruction::JumpRelative(condition), 2))
             }
             0x09 | 0x19 | 0x29 | 0x39 => {
                 let source = match byte {
@@ -456,7 +459,7 @@ impl Instruction {
                     0x39 => AddSource::SP,
                     _ => panic!("Unreachable Instruction"),
                 };
-                (Instruction::Add(AddTarget::HL, source), 2)
+                Ok((Instruction::Add(AddTarget::HL, source), 2))
             }
             0x0a | 0x1a | 0x2a | 0x3a => {
                 let source = match byte {
@@ -467,7 +470,7 @@ impl Instruction {
                     _ => panic!("Unreachable Instruction"),
                 };
 
-                (Instruction::Load(LoadTarget::A, source), 2)
+                Ok((Instruction::Load(LoadTarget::A, source), 2))
             }
             0x0b | 0x1b | 0x2b | 0x3b => {
                 let target = match byte {
@@ -478,7 +481,7 @@ impl Instruction {
                     _ => panic!("Unreachable Instruction"),
                 };
 
-                (Instruction::Decrement(target), 2)
+                Ok((Instruction::Decrement(target), 2))
             }
             0x0c | 0x1c | 0x2c | 0x3c => {
                 let target = match byte {
@@ -489,7 +492,7 @@ impl Instruction {
                     _ => panic!("Unreachable Instruction"),
                 };
 
-                (Instruction::Increment(target), 1)
+                Ok((Instruction::Increment(target), 1))
             }
             0x0d | 0x1d | 0x2d | 0x3d => {
                 let target = match byte {
@@ -500,7 +503,7 @@ impl Instruction {
                     _ => panic!("Unreachable Instruction"),
                 };
 
-                (Instruction::Decrement(target), 1)
+                Ok((Instruction::Decrement(target), 1))
             }
             0x0e | 0x1e | 0x2e | 0x3e => {
                 let target = match byte {
@@ -511,12 +514,12 @@ impl Instruction {
                     _ => panic!("Unreachable Instruction"),
                 };
 
-                (Instruction::Load(target, LoadSource::PC), 2)
+                Ok((Instruction::Load(target, LoadSource::PC), 2))
             }
-            0x0f => (Instruction::RotateRightCircular(BitwiseSource::A), 1),
-            0x1f => (Instruction::RotateRight(BitwiseSource::A), 1),
-            0x2f => (Instruction::ComplementAccumulator, 1),
-            0x3f => (Instruction::ComplementCarryFlag, 1),
+            0x0f => Ok((Instruction::RotateRightCircular(BitwiseSource::A), 1)),
+            0x1f => Ok((Instruction::RotateRight(BitwiseSource::A), 1)),
+            0x2f => Ok((Instruction::ComplementAccumulator, 1)),
+            0x3f => Ok((Instruction::ComplementCarryFlag, 1)),
             0x40..=0x75 | 0x77..=0x7f => {
                 let target = match byte {
                     0x40..=0x47 => LoadTarget::B,
@@ -549,9 +552,9 @@ impl Instruction {
                     _ => 1,
                 };
 
-                (Instruction::Load(target, source), cycles)
+                Ok((Instruction::Load(target, source), cycles))
             }
-            0x76 => (Instruction::Halt, 1),
+            0x76 => Ok((Instruction::Halt, 1)),
             0x80..=0x87 => {
                 let source = match byte & 0x0f {
                     0x00 => AddSource::B,
@@ -567,7 +570,7 @@ impl Instruction {
 
                 let cycles = if source == AddSource::HLAddr { 2 } else { 1 };
 
-                (Instruction::Add(AddTarget::A, source), cycles)
+                Ok((Instruction::Add(AddTarget::A, source), cycles))
             }
             0x88..=0x8f => {
                 let source = match byte & 0x0f {
@@ -588,7 +591,7 @@ impl Instruction {
                     1
                 };
 
-                (Instruction::AddCarry(source), cycles)
+                Ok((Instruction::AddCarry(source), cycles))
             }
             0x90..=0x97 => {
                 let source = match byte & 0x0f {
@@ -609,7 +612,7 @@ impl Instruction {
                     1
                 };
 
-                (Instruction::Subtract(source), cycles)
+                Ok((Instruction::Subtract(source), cycles))
             }
             0x98..=0x9f => {
                 let source = match byte & 0x0f {
@@ -630,7 +633,7 @@ impl Instruction {
                     1
                 };
 
-                (Instruction::SubtractCarry(source), cycles)
+                Ok((Instruction::SubtractCarry(source), cycles))
             }
             0xa0..=0xa7 => {
                 let source = match byte & 0x0f {
@@ -647,7 +650,7 @@ impl Instruction {
 
                 let cycles = if source == AndSource::HLAddr { 2 } else { 1 };
 
-                (Instruction::And(source), cycles)
+                Ok((Instruction::And(source), cycles))
             }
             0xa8..=0xaf => {
                 let source = match byte & 0x0f {
@@ -664,7 +667,7 @@ impl Instruction {
 
                 let cycles = if source == XOrSource::HLAddr { 2 } else { 1 };
 
-                (Instruction::XOr(source), cycles)
+                Ok((Instruction::XOr(source), cycles))
             }
             0xb0..=0xb7 => {
                 let source = match byte & 0x0f {
@@ -681,7 +684,7 @@ impl Instruction {
 
                 let cycles = if source == OrSource::HLAddr { 2 } else { 1 };
 
-                (Instruction::Or(source), cycles)
+                Ok((Instruction::Or(source), cycles))
             }
             0xb8..=0xbf => {
                 let source = match byte & 0x0f {
@@ -702,10 +705,10 @@ impl Instruction {
                     1
                 };
 
-                (Instruction::Compare(source), cycles)
+                Ok((Instruction::Compare(source), cycles))
             }
-            0xc0 => (Instruction::Return(JumpCondition::NZ), 2),
-            0xd0 => (Instruction::Return(JumpCondition::NC), 2),
+            0xc0 => Ok((Instruction::Return(JumpCondition::NZ), 2)),
+            0xd0 => Ok((Instruction::Return(JumpCondition::NC), 2)),
             0xc1 | 0xd1 | 0xe1 | 0xf1 => {
                 let target = match byte & 0xF0 {
                     0xc0 => PopTarget::BC,
@@ -715,7 +718,7 @@ impl Instruction {
                     _ => panic!("Unreachable Instruction"),
                 };
 
-                (Instruction::Pop(target), 3)
+                Ok((Instruction::Pop(target), 3))
             }
             0xc5 | 0xd5 | 0xe5 | 0xf5 => {
                 let target = match byte & 0xF0 {
@@ -726,77 +729,78 @@ impl Instruction {
                     _ => panic!("Unreachable Instruction"),
                 };
 
-                (Instruction::Push(target), 3)
+                Ok((Instruction::Push(target), 3))
             }
-            0xc2 => (Instruction::Jump(JumpCondition::NZ), 3),
-            0xd2 => (Instruction::Jump(JumpCondition::NC), 3),
-            0xc3 => (Instruction::Jump(JumpCondition::None), 4),
-            0xe0 => (
+            0xc2 => Ok((Instruction::Jump(JumpCondition::NZ), 3)),
+            0xd2 => Ok((Instruction::Jump(JumpCondition::NC), 3)),
+            0xc3 => Ok((Instruction::Jump(JumpCondition::None), 4)),
+            0xe0 => Ok((
                 Instruction::LoadAccumulator(
                     LoadAccumulatorTarget::PCAddr,
                     LoadAccumulatorSource::A,
                 ),
                 3,
-            ),
-            0xf0 => (
+            )),
+            0xf0 => Ok((
                 Instruction::LoadAccumulator(
                     LoadAccumulatorTarget::A,
                     LoadAccumulatorSource::PCAddr,
                 ),
                 3,
-            ),
-            0xe2 => (
+            )),
+            0xe2 => Ok((
                 Instruction::LoadAccumulator(
                     LoadAccumulatorTarget::CAddr,
                     LoadAccumulatorSource::A,
                 ),
                 2,
-            ),
-            0xf2 => (
+            )),
+            0xf2 => Ok((
                 Instruction::LoadAccumulator(
                     LoadAccumulatorTarget::A,
                     LoadAccumulatorSource::CAddr,
                 ),
                 2,
-            ),
-            0xf3 => (Instruction::DisableInterrupts, 1),
-            0xc4 => (Instruction::Call(JumpCondition::NZ), 3),
-            0xd4 => (Instruction::Call(JumpCondition::NC), 3),
-            0xc6 => (Instruction::Add(AddTarget::A, AddSource::PC), 2),
-            0xd6 => (Instruction::Subtract(SubtractSource::PC), 2),
-            0xe6 => (Instruction::And(AndSource::PC), 2),
-            0xf6 => (Instruction::Or(OrSource::PC), 2),
-            0xc7 => (Instruction::Restart(0x00), 4),
-            0xd7 => (Instruction::Restart(0x10), 4),
-            0xe7 => (Instruction::Restart(0x20), 4),
-            0xf7 => (Instruction::Restart(0x30), 4),
-            0xc8 => (Instruction::Return(JumpCondition::Z), 2),
-            0xd8 => (Instruction::Return(JumpCondition::C), 2),
-            0xe8 => (Instruction::Add(AddTarget::SP, AddSource::E), 4),
-            0xf8 => (Instruction::Load(LoadTarget::HL, LoadSource::SPE), 3),
-            0xc9 => (Instruction::Return(JumpCondition::None), 4),
-            0xd9 => (Instruction::ReturnInterrupt, 4),
-            0xe9 => (Instruction::JumpHL, 1),
-            0xf9 => (Instruction::Load(LoadTarget::SP, LoadSource::HL), 2),
-            0xca => (Instruction::Jump(JumpCondition::Z), 3),
-            0xda => (Instruction::Jump(JumpCondition::C), 3),
-            0xea => (Instruction::Load(LoadTarget::PCAddr, LoadSource::A), 4),
-            0xfa => (Instruction::Load(LoadTarget::A, LoadSource::PCAddr), 4),
-            0xcb => (Instruction::CB, 1),
-            0xfb => (Instruction::EnableInterrupts, 1),
-            0xcc => (Instruction::Call(JumpCondition::Z), 3),
-            0xdc => (Instruction::Call(JumpCondition::C), 3),
-            0xcd => (Instruction::Call(JumpCondition::C), 6),
-            0xce => (Instruction::AddCarry(AddCarrySource::PC), 2),
-            0xde => (Instruction::SubtractCarry(SubtractCarrySource::PC), 2),
-            0xee => (Instruction::XOr(XOrSource::PC), 2),
-            0xfe => (Instruction::Compare(CompareSource::PC), 2),
-            0xcf => (Instruction::Restart(0x08), 4),
-            0xdf => (Instruction::Restart(0x18), 4),
-            0xef => (Instruction::Restart(0x28), 4),
-            0xff => (Instruction::Restart(0x38), 4),
-            0xd3 | 0xe3 | 0xe4 | 0xf4 | 0xdb | 0xeb | 0xec | 0xfc | 0xdd | 0xed | 0xfd => {
-                panic!("Unknown Instruction Code: {:#x}", byte)
+            )),
+            0xf3 => Ok((Instruction::DisableInterrupts, 1)),
+            0xc4 => Ok((Instruction::Call(JumpCondition::NZ), 3)),
+            0xd4 => Ok((Instruction::Call(JumpCondition::NC), 3)),
+            0xc6 => Ok((Instruction::Add(AddTarget::A, AddSource::PC), 2)),
+            0xd6 => Ok((Instruction::Subtract(SubtractSource::PC), 2)),
+            0xe6 => Ok((Instruction::And(AndSource::PC), 2)),
+            0xf6 => Ok((Instruction::Or(OrSource::PC), 2)),
+            0xc7 => Ok((Instruction::Restart(0x00), 4)),
+            0xd7 => Ok((Instruction::Restart(0x10), 4)),
+            0xe7 => Ok((Instruction::Restart(0x20), 4)),
+            0xf7 => Ok((Instruction::Restart(0x30), 4)),
+            0xc8 => Ok((Instruction::Return(JumpCondition::Z), 2)),
+            0xd8 => Ok((Instruction::Return(JumpCondition::C), 2)),
+            0xe8 => Ok((Instruction::Add(AddTarget::SP, AddSource::PCe), 4)),
+            0xf8 => Ok((Instruction::Load(LoadTarget::HL, LoadSource::SPE), 3)),
+            0xc9 => Ok((Instruction::Return(JumpCondition::None), 4)),
+            0xd9 => Ok((Instruction::ReturnInterrupt, 4)),
+            0xe9 => Ok((Instruction::JumpHL, 1)),
+            0xf9 => Ok((Instruction::Load(LoadTarget::SP, LoadSource::HL), 2)),
+            0xca => Ok((Instruction::Jump(JumpCondition::Z), 3)),
+            0xda => Ok((Instruction::Jump(JumpCondition::C), 3)),
+            0xea => Ok((Instruction::Load(LoadTarget::PCAddr, LoadSource::A), 4)),
+            0xfa => Ok((Instruction::Load(LoadTarget::A, LoadSource::PCAddr), 4)),
+            0xcb => Ok((Instruction::CB, 1)),
+            0xfb => Ok((Instruction::EnableInterrupts, 1)),
+            0xcc => Ok((Instruction::Call(JumpCondition::Z), 3)),
+            0xdc => Ok((Instruction::Call(JumpCondition::C), 3)),
+            0xcd => Ok((Instruction::Call(JumpCondition::None), 6)),
+            0xce => Ok((Instruction::AddCarry(AddCarrySource::PC), 2)),
+            0xde => Ok((Instruction::SubtractCarry(SubtractCarrySource::PC), 2)),
+            0xee => Ok((Instruction::XOr(XOrSource::PC), 2)),
+            0xfe => Ok((Instruction::Compare(CompareSource::PC), 2)),
+            0xcf => Ok((Instruction::Restart(0x08), 4)),
+            0xdf => Ok((Instruction::Restart(0x18), 4)),
+            0xef => Ok((Instruction::Restart(0x28), 4)),
+            0xff => Ok((Instruction::Restart(0x38), 4)),
+            _ => {
+                error!("Unknown Instruction Code: {:#x}", byte);
+                Err(())
             }
         }
     }
@@ -836,6 +840,21 @@ impl Instruction {
             0x70..=0x77 => (Instruction::Bit(6, source), cycles),
             0x78..=0x7f => (Instruction::Bit(7, source), cycles),
             0x80..=0x87 => (Instruction::RES(0, source), cycles),
+            0x88..=0x8f => (Instruction::RES(1, source), cycles),
+            0x90..=0x97 => (Instruction::RES(2, source), cycles),
+            0x98..=0x9f => (Instruction::RES(3, source), cycles),
+            0xa0..=0xa7 => (Instruction::RES(4, source), cycles),
+            0xa8..=0xaf => (Instruction::RES(5, source), cycles),
+            0xb0..=0xb7 => (Instruction::RES(6, source), cycles),
+            0xb8..=0xbf => (Instruction::RES(7, source), cycles),
+            0xc0..=0xc7 => (Instruction::SET(0, source), cycles),
+            0xc8..=0xcf => (Instruction::SET(1, source), cycles),
+            0xd0..=0xd7 => (Instruction::SET(2, source), cycles),
+            0xd8..=0xdf => (Instruction::SET(3, source), cycles),
+            0xe0..=0xe7 => (Instruction::SET(4, source), cycles),
+            0xe8..=0xef => (Instruction::SET(5, source), cycles),
+            0xf0..=0xf7 => (Instruction::SET(6, source), cycles),
+            0xf8..=0xff => (Instruction::SET(7, source), cycles),
             _ => panic!("Unknown Instruction: {:#x}", byte),
         }
     }

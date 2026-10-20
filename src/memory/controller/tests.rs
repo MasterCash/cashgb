@@ -67,7 +67,7 @@ mod controller_tests {
     fn test_mbc1_create_fixed_ram() {
         let rom = create_test_cart_sized_data(
             rom_codes::CODE_1_MEGABYTES,
-            Some(ram_codes::CODE_32_KILOBYTES),
+            Some(ram_codes::CODE_8_KILOBYTES),
         );
 
         let controller = create_mbc(MapperType::MBC1, rom);

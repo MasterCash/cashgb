@@ -10,6 +10,7 @@ use cart::Cart;
 use log::{debug, trace, warn};
 
 pub mod memory_sizes {
+    pub const MEM_4_KILOBYTES: u32 = 0x1000;
     pub const MEM_8_KILOBYTES: u32 = 0x2000;
     pub const MEM_16_KILOBYTES: u32 = MEM_8_KILOBYTES * 2;
     pub const MEM_32_KILOBYTES: u32 = MEM_16_KILOBYTES * 2;
@@ -26,7 +27,7 @@ pub struct MemoryBus {
     pub(crate) cart: Cart,
     pub(crate) ppu: Ppu,
     pub(crate) v_ram_bank: u8,
-    pub(crate) w_ram: Vec<[u8; 0x2000]>,
+    pub(crate) w_ram: Vec<[u8; memory_sizes::MEM_4_KILOBYTES as usize]>,
     pub(crate) w_ram_bank: u8,
     pub(crate) io_registers: [u8; 0x80],
     pub(crate) h_ram: [u8; 0x80],
@@ -39,7 +40,7 @@ impl MemoryBus {
             cart,
             ppu: Ppu::new(),
             v_ram_bank: 0,
-            w_ram: vec![[0; 0x2000]; 8],
+            w_ram: vec![[0; memory_sizes::MEM_4_KILOBYTES as usize]; 8],
             w_ram_bank: 1,
             io_registers: [0; 0x80],
             h_ram: [0; 0x80],
@@ -51,7 +52,7 @@ impl MemoryBus {
             cart: Cart::empty(),
             ppu: Ppu::new(),
             v_ram_bank: 0,
-            w_ram: vec![[0; 0x2000]; 9],
+            w_ram: vec![[0; memory_sizes::MEM_4_KILOBYTES as usize]; 9],
             w_ram_bank: 0,
             io_registers: [0; 0x80],
             h_ram: [0; 0x80],
@@ -95,6 +96,7 @@ impl MemoryBus {
                     // PPU registers (0xFF40-0xFF4B)
                     0xFF40..=0xFF4B => self.ppu.registers.read_register(addr),
                     // Other I/O registers
+                    0xff00 => 0xff, // Joypad input (not implemented)
                     _ => self.io_registers[(addr - 0xff00) as usize],
                 }
             }
@@ -139,8 +141,9 @@ impl MemoryBus {
             }
 
             // Echo RAM - should mirror work RAM writes
-            0xe000..=0xfdff => {
-                debug!("attempting to write to echo RAM at {:#x}", addr);
+            0xe000..=0xefff => self.w_ram[0][(addr - 0xe000) as usize] = value,
+            0xf000..=0xfdff => {
+                self.w_ram[self.w_ram_bank as usize][(addr - 0xf000) as usize] = value
             }
 
             // Object Attribute Memory (OAM) - route through PPU for timing restrictions
@@ -151,7 +154,10 @@ impl MemoryBus {
 
             // Unusable memory area
             0xfea0..=0xfeff => {
-                panic!("attempting to write to unusable address {:#x}", addr);
+                warn!(
+                    "attempting to write to unusable address {:#x} with value {:#x}",
+                    addr, value
+                );
             }
 
             // I/O registers
@@ -159,11 +165,11 @@ impl MemoryBus {
                 match addr {
                     // PPU registers (0xFF40-0xFF4B)
                     0xFF40..=0xFF4B => {
-                        self.ppu.registers.write_register(addr, value);
+                        self.ppu.write_register(addr, value);
                     }
                     // Special I/O register writes
                     0xff4f => self.v_ram_bank = value & 1, // VRAM bank select
-                    0xff50 => return Some(CpuStatus::Stopped), // Boot ROM disable
+                    0xff50 => (),                          // Boot ROM disable
                     0xff70 => self.w_ram_bank = value & 0x07, // WRAM bank select
                     // Other I/O registers
                     _ => {

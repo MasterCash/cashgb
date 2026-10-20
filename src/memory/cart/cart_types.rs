@@ -36,6 +36,7 @@ pub struct CartType {
 
 #[derive(Debug, Clone)]
 pub enum CartError {
+    InvalidHeaderLocation(u16),
     MissingCart(String),
     InvalidRomSize(u8),
     InvalidRamSize(u8),
@@ -194,6 +195,9 @@ impl Display for CartError {
             CartError::InvalidRomSize(size) => write!(f, "Invalid ROM size: {}", size),
             CartError::InvalidRamSize(size) => write!(f, "Invalid RAM size: {}", size),
             CartError::InvalidCartType(cart_type) => write!(f, "Invalid cart type: {}", cart_type),
+            CartError::InvalidHeaderLocation(location) => {
+                write!(f, "Invalid header location: {}", location)
+            }
             CartError::UnsupportedMapper(mapper) => write!(f, "Unsupported mapper: {:?}", mapper),
             CartError::InvalidLogo => write!(f, "Invalid Nintendo logo"),
             CartError::HeaderCheckSumFailure {
