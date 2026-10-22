@@ -8,7 +8,7 @@ The tiers are in a suggested build order: each one builds on the one before.
 
 ## Suggested next steps
 
-1. dmg-acid2 and the Mooneye suite on the headless runner, and run `cargo test` in CI.
+1. Fix the ignored Mooneye tests (`cargo test --release --test mooneye -- --ignored`), starting with cycle-accurate memory timing.
 2. MBC3 and MBC5, plus battery saves.
 3. Audio.
 4. Save states, which make rewind and reverse stepping possible.
@@ -18,11 +18,20 @@ The tiers are in a suggested build order: each one builds on the one before.
 
 Mature emulators prove correctness with community test ROMs. They are the cheapest way to find CPU, timer and PPU bugs.
 
-- [ ] **Headless test-ROM runner** (`cash_gb::headless`): runs a ROM with no window and reads its serial output. Still to add: screenshot comparison, and running it in CI.
+- [x] **Headless test-ROM runner** (`cash_gb::headless`): runs a ROM with no window, reads its serial output, and compares screenshots. GitHub Actions runs `cargo fmt --check`, `cargo clippy` and `cargo test` on every push and pull request (`.github/workflows/ci.yml`).
   - [x] Serial port output (`0xFF01`/`0xFF02`), which Blargg's tests use to report results
   - [x] Blargg `cpu_instrs` and `instr_timing` (`tests/blargg.rs`)
-  - [ ] dmg-acid2: one reference screenshot that covers most PPU rendering rules
-  - [ ] Mooneye test suite: timing, interrupt and MBC edge cases
+  - [x] dmg-acid2: one reference screenshot that covers most PPU rendering rules (`tests/dmg_acid2.rs`, passes)
+  - [x] Mooneye test suite: timing, interrupt and MBC edge cases (`tests/mooneye.rs`). 36 of 79 pass; the rest are `#[ignore]`d with a reason.
+- [ ] **Pass the ignored Mooneye tests.** Remove each `#[ignore]` as its test starts passing:
+  - [ ] 21 CPU timing tests (`call_timing`, `push_timing`, `intr_timing`, `oam_dma_timing`, ...): need cycle-accurate memory timing, below
+  - [ ] 11 PPU timing tests (`ppu/*`): need accurate mode timing and variable-length mode 3, below
+  - [ ] 3 timer reload tests (`tima_reload`, `tima_write_reloading`, `tma_write_reloading`): the TMA reload delay, below
+  - [ ] 3 post-boot state tests (`boot_div`, `boot_hwio`, `serial/boot_sclk_align`): DIV, I/O registers and the serial clock should start as the boot ROM leaves them
+  - [ ] `bits/unused_hwio`: unused bits of I/O registers should read back as 1
+  - [ ] `oam_dma_restart` and `oam_dma/sources`: OAM DMA restarting mid-transfer, and DMA from every source region
+  - [ ] `mbc1/ram_64kb`: MBC1 with 64 KiB of cart RAM
+  - [ ] `mbc1/multicart_rom_8Mb`: detect MBC1 multicarts (MBC1M), which wire the bank bits differently
 - [ ] **Timer accuracy:**
   - [x] Writing DIV resets the internal counter that TIMA is derived from
   - [ ] TIMA reloads from TMA one cycle after it overflows.

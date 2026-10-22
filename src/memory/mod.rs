@@ -162,10 +162,12 @@ impl MemoryBus {
                 trace!("writing {:#x} to OAM at {:#x}", value, addr);
             }
 
-            // Unusable memory area
             // Unusable memory area: writes are ignored (see `read`)
             0xfea0..=0xfeff => {
-                trace!("ignored write of {:#x} to unusable address {:#x}", value, addr);
+                trace!(
+                    "ignored write of {:#x} to unusable address {:#x}",
+                    value, addr
+                );
             }
 
             // I/O registers

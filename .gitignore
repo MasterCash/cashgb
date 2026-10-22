@@ -32,7 +32,7 @@
 *.app
 
 # Roms
-roms/
+/roms/
 
 # Added by cargo
 

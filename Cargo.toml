@@ -11,3 +11,6 @@ clap = { version = "4.0", features = ["derive"] }
 eframe = "0.37"
 egui = "0.37"
 rfd = "0.17.2"
+
+[dev-dependencies]
+png = "0.17"
