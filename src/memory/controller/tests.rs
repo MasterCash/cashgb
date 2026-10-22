@@ -220,6 +220,80 @@ mod controller_tests {
         assert_matches!(datum, Some(1));
     }
 
+    #[test]
+    fn test_no_controller_rom_offset_is_identity() {
+        let rom = Vec::from(create_test_cart_data());
+        let controller = create_mbc(MapperType::None, rom).unwrap();
+
+        assert_eq!(controller.rom_offset(0x0150), Some(0x0150));
+        assert_eq!(controller.rom_offset(0x7FFF), Some(0x7FFF));
+        assert_eq!(controller.rom_offset(0xC000), None);
+    }
+
+    #[test]
+    fn test_mbc1_rom_offset_follows_selected_bank() {
+        use mbc1::mbc1_addresses::*;
+        let (rom, bank_size) = create_rom(rom_codes::CODE_2_MEGABYTES, ram_codes::CODE_8_KILOBYTES);
+        let mut controller = create_mbc(MapperType::MBC1, rom).unwrap();
+
+        assert_eq!(controller.rom_offset(0x0100), Some(0x0100), "fixed bank 0");
+        assert_eq!(
+            controller.rom_offset(0x4010),
+            Some(bank_size + 0x10),
+            "bank 1 by default"
+        );
+
+        controller.write(ROM_BANK_NUM_START, 5);
+        assert_eq!(controller.rom_offset(0x4010), Some(5 * bank_size + 0x10));
+        assert_eq!(controller.rom_offset(0xA000), None, "cart RAM is not ROM");
+    }
+
+    #[test]
+    fn test_mbc1_zero_check_happens_before_wrapping_to_rom_size() {
+        use mbc1::mbc1_addresses::*;
+        let (rom, bank_size) = create_rom(rom_codes::CODE_64_KILOBYTES, ram_codes::CODE_NONE);
+        let mut controller = create_mbc(MapperType::MBC1, rom).unwrap();
+
+        // 4 is non-zero, so no 0 -> 1 substitution; it then wraps to bank 0 on a 4-bank ROM
+        controller.write(ROM_BANK_NUM_START, 4);
+        assert_eq!(controller.rom_offset(0x4000), Some(0));
+
+        controller.write(ROM_BANK_NUM_START, 0); // 0 really is substituted
+        assert_eq!(controller.rom_offset(0x4000), Some(bank_size));
+    }
+
+    #[test]
+    fn test_mbc1_upper_bank_bits_apply_in_mode_0() {
+        use mbc1::mbc1_addresses::*;
+        let (rom, bank_size) = create_rom(rom_codes::CODE_1_MEGABYTES, ram_codes::CODE_NONE);
+        let mut controller = create_mbc(MapperType::MBC1, rom).unwrap();
+
+        controller.write(ROM_BANK_NUM_START, 0x01);
+        controller.write(RAM_BANK_NUM_START, 0x01); // upper bits: bank 0x21
+        controller.write(MODE_SELECT_START, 0x00);
+
+        assert_eq!(controller.rom_offset(0x4000), Some(0x21 * bank_size));
+        assert_eq!(
+            controller.rom_offset(0x0000),
+            Some(0),
+            "mode 0: fixed area is bank 0"
+        );
+    }
+
+    #[test]
+    fn test_mbc1_mode_1_moves_the_fixed_area() {
+        use mbc1::mbc1_addresses::*;
+        let (rom, bank_size) = create_rom(rom_codes::CODE_1_MEGABYTES, ram_codes::CODE_NONE);
+        let mut controller = create_mbc(MapperType::MBC1, rom).unwrap();
+
+        controller.write(ROM_BANK_NUM_START, 0x01);
+        controller.write(RAM_BANK_NUM_START, 0x01);
+        controller.write(MODE_SELECT_START, 0x01);
+
+        assert_eq!(controller.rom_offset(0x0000), Some(0x20 * bank_size));
+        assert_eq!(controller.rom_offset(0x4000), Some(0x21 * bank_size));
+    }
+
     fn create_rom(rom_code: u8, ram_code: u8) -> (Vec<u8>, usize) {
         let rom = create_test_cart_sized_data(rom_code, Some(ram_code));
         let (rom_size, rom_banks) = get_rom_size(&rom_code).unwrap();

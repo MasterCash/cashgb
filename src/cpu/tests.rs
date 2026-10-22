@@ -13,6 +13,7 @@ mod cpu_tests {
     use crate::cpu::instructions::*;
     use crate::memory::cart::Cart;
     use crate::memory::cart::cart_header::addresses;
+    use crate::memory::joypad::Button;
 
     /// Helper function to create a simple test cart with minimal ROM
     fn create_test_cart() -> Cart {
@@ -271,5 +272,34 @@ mod cpu_tests {
         // Third step should process instruction
         cpu.step();
         assert_eq!(cpu.step_count, 0);
+    }
+
+    #[test]
+    fn test_button_press_wakes_cpu_from_stop() {
+        let mut cpu = create_test_cpu();
+        cpu.status = CpuStatus::Stopped;
+
+        cpu.set_button(Button::Start, true);
+
+        assert_eq!(cpu.status, CpuStatus::Running);
+    }
+
+    #[test]
+    fn test_button_release_does_not_wake_cpu_from_stop() {
+        let mut cpu = create_test_cpu();
+        cpu.set_button(Button::Start, true);
+        cpu.status = CpuStatus::Stopped;
+
+        cpu.set_button(Button::Start, false);
+
+        assert_eq!(cpu.status, CpuStatus::Stopped);
+    }
+
+    #[test]
+    fn test_read_memory_sees_timer_registers() {
+        let mut cpu = create_test_cpu();
+        cpu.write(&0xFF06, 0x42); // TMA
+
+        assert_eq!(cpu.read_memory(0xFF06), 0x42);
     }
 }

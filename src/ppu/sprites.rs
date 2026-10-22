@@ -78,6 +78,8 @@ struct SpriteRenderParams<'a> {
     bg_buffer: &'a [u8; 160],
     sprite_buffer: &'a mut [u8; 160],
     priority_buffer: &'a mut [bool; 160],
+    /// Pixels already won by a higher-priority sprite, even if it ended up hidden behind the BG
+    claimed: &'a mut [bool; 160],
 }
 
 pub struct SpriteRenderer {
@@ -140,15 +142,16 @@ impl SpriteRenderer {
         sprite_buffer: &mut [u8; 160],
         priority_buffer: &mut [bool; 160],
     ) {
+        // Clear first, so a line rendered with sprites disabled shows none
+        sprite_buffer.fill(0);
+        priority_buffer.fill(false);
+
         if !registers.is_sprites_enabled() {
             return;
         }
 
         let sprite_height = if registers.sprite_size() { 16 } else { 8 };
-
-        // Clear sprite buffer
-        sprite_buffer.fill(0);
-        priority_buffer.fill(false);
+        let mut claimed = [false; 160];
 
         let mut params = SpriteRenderParams {
             vram,
@@ -158,10 +161,11 @@ impl SpriteRenderer {
             bg_buffer,
             sprite_buffer,
             priority_buffer,
+            claimed: &mut claimed,
         };
 
-        // Render each sprite (in reverse order for proper priority)
-        for sprite in self.line_sprites.iter().rev() {
+        // line_sprites is sorted highest priority first, and the first sprite to claim a pixel keeps it
+        for sprite in self.line_sprites.iter() {
             self.render_sprite(sprite, &mut params);
         }
     }
@@ -217,31 +221,21 @@ impl SpriteRenderer {
             let color_id =
                 self.get_sprite_pixel(params.vram, tile_index, sprite_pixel_x, sprite_row);
 
-            // Color 0 is transparent for sprites
+            // Color 0 is transparent for sprites and doesn't claim the pixel
             if color_id == 0 {
                 continue;
             }
 
-            // Check sprite priority
-            let has_priority = sprite.has_priority();
+            // A higher-priority sprite already won this pixel
+            if params.claimed[screen_x_usize] {
+                continue;
+            }
+            params.claimed[screen_x_usize] = true;
+
+            // The winning sprite is only visible if it's in front of the background
+            // (bit 7 = 0) or the background colour id here is 0
             let bg_color = params.bg_buffer[screen_x_usize];
-
-            // Sprite priority rules:
-            // 1. If sprite has priority (bit 7 = 0), it appears over background
-            // 2. If sprite doesn't have priority (bit 7 = 1), it only appears over background color 0
-            // 3. Sprites always appear over each other based on X position and OAM index
-            let should_render = if params.priority_buffer[screen_x_usize] {
-                // Another sprite already rendered here, skip
-                false
-            } else if has_priority {
-                // High priority sprite, always render
-                true
-            } else {
-                // Low priority sprite, only render over background color 0
-                bg_color == 0
-            };
-
-            if should_render {
+            if sprite.has_priority() || bg_color == 0 {
                 // Apply sprite palette
                 let palette_color = params
                     .registers

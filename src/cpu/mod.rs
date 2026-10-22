@@ -7,7 +7,7 @@ mod tests;
 
 use crate::{
     cpu::{instructions::Instruction::Nop, registers::TimerRegister},
-    memory::{MemoryBus, cart::Cart},
+    memory::{MemoryBus, cart::Cart, joypad::Button},
 };
 use instructions::*;
 use log::{debug, trace};
@@ -26,7 +26,26 @@ pub struct Cpu {
     pub(crate) timer_register: TimerRegister,
 }
 
+/// M-cycles in one frame: 70224 dots at 4 dots per M-cycle
+pub const M_CYCLES_PER_FRAME: u32 = 70224 / 4;
+
 impl Cpu {
+    /// Run until the PPU finishes a frame or the CPU errors. Stops after one frame's worth of
+    /// M-cycles even if no frame completes, for example while the LCD is off.
+    pub fn run_frame(&mut self) {
+        for _ in 0..M_CYCLES_PER_FRAME {
+            self.step();
+            if self.status == CpuStatus::Errored || self.is_frame_ready() {
+                return;
+            }
+        }
+    }
+
+    /// Every byte the program has sent over the serial port.
+    pub fn serial_output(&self) -> &[u8] {
+        self.memory.serial_output()
+    }
+
     pub fn step_instruction(&mut self) {
         self.step();
         while self.status != CpuStatus::Errored
@@ -49,6 +68,8 @@ impl Cpu {
         // Step PPU (assuming 4 cycles per CPU step for timing)
         let ppu_interrupts = self.memory.step_ppu(4);
         self.memory.request_interrupts(ppu_interrupts);
+
+        self.memory.step_serial();
 
         // handle instructions
         if self.step_count == 0 {
@@ -166,7 +187,10 @@ impl Cpu {
     }
 
     pub(crate) fn write(&mut self, addr: &u16, value: u8) {
-        self.timer_register.write(*addr, value);
+        // Writing DIV or TAC can tick TIMA, and so overflow it
+        if let Some(interrupt) = self.timer_register.write(*addr, value) {
+            self.request_interrupt(interrupt);
+        }
 
         if let Some(new_status) = self.memory.write(*addr, value) {
             self.status = new_status;
@@ -465,8 +489,23 @@ impl Cpu {
         &self.instruction
     }
 
+    /// Read a byte for debugging. Sees the timer registers like `read` does, but ignores the
+    /// PPU's VRAM/OAM access restrictions and has no side effects.
     pub fn read_memory(&self, addr: u16) -> u8 {
-        self.memory.read(addr)
+        if let Some(value) = self.timer_register.read(addr) {
+            return value;
+        }
+        self.memory.peek(addr)
+    }
+
+    /// Press or release a joypad button. A new press of a selected input requests the
+    /// Joypad interrupt, and any new press wakes the CPU from STOP.
+    pub fn set_button(&mut self, button: Button, pressed: bool) {
+        let was_pressed = self.memory.joypad.is_pressed(button);
+        self.memory.set_button(button, pressed);
+        if pressed && !was_pressed && self.status == CpuStatus::Stopped {
+            self.status = CpuStatus::Running;
+        }
     }
 
     pub fn get_flags(&self) -> (bool, bool, bool, bool) {

@@ -49,11 +49,18 @@ pub mod mbc1_addresses {
 }
 
 impl MBC1 {
+    /// Bank mapped at 0x4000-0x7FFF, before wrapping to the ROM size. The upper bits from
+    /// 0x4000-0x5FFF apply in both banking modes.
     pub fn get_rom_bank(&self) -> u8 {
+        self.rom_bank | ((self.ram_bank & 0x03) << 5)
+    }
+
+    /// Bank mapped at 0x0000-0x3FFF: bank 0, except in mode 1 where the upper bits apply.
+    fn get_fixed_rom_bank(&self) -> u8 {
         if self.mode == MBC1Mode::Ram {
-            self.rom_bank
+            (self.ram_bank & 0x03) << 5
         } else {
-            self.rom_bank | ((self.ram_bank & 0x03) << 5)
+            0
         }
     }
 
@@ -63,12 +70,6 @@ impl MBC1 {
         } else {
             self.ram_bank & 0x03
         }
-    }
-
-    pub fn get_rom_size(&self) -> Result<(u32, u16, u8), CartError> {
-        let code = self.rom[addresses::ROM_SIZE as usize];
-        let (size, count) = get_rom_size(&code)?;
-        Ok((size, count, code))
     }
 
     pub fn new(rom: Vec<u8>) -> Result<Self, CartError> {
@@ -118,20 +119,9 @@ impl MemoryBankController for MBC1 {
         use mbc1_addresses::*;
         // TODO: Address the rom bank type diff solved by as u8 currently
         match addr {
-            // ROM Bank 0 (fixed)
-            ROM_BANK_FIXED_START..=ROM_BANK_FIXED_END => Some(self.rom[addr as usize]),
-
-            // ROM Bank 1-127 (switchable)
-            ROM_BANK_DYN_START..=ROM_BANK_DYN_END => {
-                let rom_addr = (self.get_rom_bank() as usize
-                    * memory_sizes::MEM_16_KILOBYTES as usize)
-                    + (addr - ROM_BANK_DYN_START) as usize;
-
-                if rom_addr < self.rom.len() {
-                    Some(self.rom[rom_addr])
-                } else {
-                    None
-                }
+            // ROM Bank 0 (fixed) and ROM Bank 1-127 (switchable)
+            ROM_BANK_FIXED_START..=ROM_BANK_DYN_END => {
+                self.rom_offset(addr).map(|offset| self.rom[offset])
             }
 
             // RAM Bank (if enabled)
@@ -153,6 +143,22 @@ impl MemoryBankController for MBC1 {
         }
     }
 
+    fn rom_offset(&self, addr: u16) -> Option<usize> {
+        use mbc1_addresses::*;
+        const BANK_SIZE: usize = memory_sizes::MEM_16_KILOBYTES as usize;
+        let (bank, within_bank) = match addr {
+            ROM_BANK_FIXED_START..=ROM_BANK_FIXED_END => (self.get_fixed_rom_bank(), addr),
+            ROM_BANK_DYN_START..=ROM_BANK_DYN_END => {
+                (self.get_rom_bank(), addr - ROM_BANK_DYN_START)
+            }
+            _ => return None,
+        };
+        // Bank numbers past the end of the ROM wrap around, as the unused address lines do
+        let banks = (self.rom.len() / BANK_SIZE).max(1);
+        let offset = (bank as usize % banks) * BANK_SIZE + within_bank as usize;
+        (offset < self.rom.len()).then_some(offset)
+    }
+
     fn write(&mut self, addr: u16, value: u8) {
         use mbc1_addresses::*;
         match addr {
@@ -163,13 +169,9 @@ impl MemoryBankController for MBC1 {
 
             // ROM Bank Number (lower 5 bits)
             ROM_BANK_NUM_START..=ROM_BANK_NUM_END => {
-                let (_, banks, _) = self.get_rom_size().unwrap_or((0, 1, 0));
+                // The 0 -> 1 substitution looks at all 5 bits, before the bank number is
+                // wrapped to the ROM size. So on a 4-bank ROM, writing 4 selects bank 0.
                 let value = value & 0x1F;
-                let value = if value > (banks - 1) as u8 {
-                    value % banks as u8
-                } else {
-                    value
-                };
                 self.rom_bank = if value == 0x00 { 0x01 } else { value }
             }
 

@@ -20,6 +20,9 @@ pub(crate) trait InternalMemoryBankController: Debug {
 /// Memory Bank Controller trait for different cartridge types
 pub(crate) trait MemoryBankController: InternalMemoryBankController {
     fn read(&self, addr: u16) -> Option<u8>;
+    /// Offset into the ROM file that a CPU address in 0x0000-0x7FFF currently maps to,
+    /// given the selected bank. `None` for addresses outside ROM or past the end of the file.
+    fn rom_offset(&self, addr: u16) -> Option<usize>;
     fn write(&mut self, addr: u16, value: u8);
     fn get_mapper_type(&self) -> MapperType;
 }

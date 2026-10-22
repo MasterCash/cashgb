@@ -1,5 +1,7 @@
 pub mod cart;
 pub mod controller;
+pub mod joypad;
+pub mod serial;
 
 #[cfg(test)]
 mod tests;
@@ -7,7 +9,9 @@ mod tests;
 use crate::cpu::instructions::{CpuStatus, Interrupt};
 use crate::ppu::Ppu;
 use cart::Cart;
-use log::{trace, warn};
+use joypad::{Button, Joypad};
+use log::trace;
+use serial::Serial;
 
 pub mod memory_sizes {
     pub const MEM_4_KILOBYTES: u32 = 0x1000;
@@ -26,12 +30,13 @@ pub mod memory_sizes {
 pub struct MemoryBus {
     pub(crate) cart: Cart,
     pub(crate) ppu: Ppu,
-    pub(crate) v_ram_bank: u8,
     pub(crate) w_ram: Vec<[u8; memory_sizes::MEM_4_KILOBYTES as usize]>,
     pub(crate) w_ram_bank: u8,
     pub(crate) io_registers: [u8; 0x80],
     pub(crate) h_ram: [u8; 0x80],
     pub(crate) ie: u8,
+    pub(crate) joypad: Joypad,
+    pub(crate) serial: Serial,
 }
 
 impl MemoryBus {
@@ -39,24 +44,26 @@ impl MemoryBus {
         Self {
             cart,
             ppu: Ppu::new(),
-            v_ram_bank: 0,
             w_ram: vec![[0; memory_sizes::MEM_4_KILOBYTES as usize]; 8],
             w_ram_bank: 1,
             io_registers: [0; 0x80],
             h_ram: [0; 0x80],
             ie: 0,
+            joypad: Joypad::new(),
+            serial: Serial::new(),
         }
     }
     pub fn empty() -> Self {
         Self {
             cart: Cart::empty(),
             ppu: Ppu::new(),
-            v_ram_bank: 0,
-            w_ram: vec![[0; memory_sizes::MEM_4_KILOBYTES as usize]; 9],
-            w_ram_bank: 0,
+            w_ram: vec![[0; memory_sizes::MEM_4_KILOBYTES as usize]; 8],
+            w_ram_bank: 1,
             io_registers: [0; 0x80],
             h_ram: [0; 0x80],
             ie: 0,
+            joypad: Joypad::new(),
+            serial: Serial::new(),
         }
     }
 
@@ -81,9 +88,10 @@ impl MemoryBus {
             // Object Attribute Memory (OAM) - route through PPU for timing restrictions
             0xfe00..=0xfe9f => self.ppu.read_oam(addr),
 
-            // Unusable memory area
+            // Unusable memory area: reads 0xFF. Games touch it routinely (for example when a
+            // loop clearing OAM runs past its end), so this is only traced, not warned about.
             0xfea0..=0xfeff => {
-                warn!("accessing unusable memory: {:#x}", addr);
+                trace!("read from unusable address {:#x}", addr);
                 0xff
             }
 
@@ -94,8 +102,15 @@ impl MemoryBus {
                     0xff46 => self.io_registers[0x46],
                     // PPU registers (0xFF40-0xFF4B)
                     0xFF40..=0xFF4B => self.ppu.registers.read_register(addr),
+                    // Joypad input
+                    0xff00 => self.joypad.read(),
+                    // Serial port
+                    0xff01 | 0xff02 => self.serial.read(addr),
+                    // Interrupt flags: the unused top 3 bits read as 1
+                    0xff0f => 0xE0 | self.get_interrupt_flags(),
+                    // No register on the DMG, including the CGB-only ones (KEY1, VBK, SVBK...)
+                    _ if !is_dmg_io_register(addr) => 0xff,
                     // Other I/O registers
-                    0xff00 => 0xff, // Joypad input (not implemented)
                     _ => self.io_registers[(addr - 0xff00) as usize],
                 }
             }
@@ -148,11 +163,9 @@ impl MemoryBus {
             }
 
             // Unusable memory area
+            // Unusable memory area: writes are ignored (see `read`)
             0xfea0..=0xfeff => {
-                warn!(
-                    "attempting to write to unusable address {:#x} with value {:#x}",
-                    addr, value
-                );
+                trace!("ignored write of {:#x} to unusable address {:#x}", value, addr);
             }
 
             // I/O registers
@@ -165,9 +178,12 @@ impl MemoryBus {
                         self.ppu.write_register(addr, value);
                     }
                     // Special I/O register writes
-                    0xff4f => self.v_ram_bank = value & 1, // VRAM bank select
-                    0xff50 => (),                          // Boot ROM disable
-                    0xff70 => self.w_ram_bank = value & 0x07, // WRAM bank select
+                    0xff00 => self.joypad.write(value), // Joypad group select
+                    0xff01 | 0xff02 => self.serial.write(addr, value), // Serial port
+                    0xff0f => self.io_registers[0x0f] = value & 0x1F, // Interrupt flags
+                    // No register on the DMG: writes are ignored. This includes the CGB
+                    // VRAM/WRAM bank selects (0xFF4F, 0xFF70) and the boot ROM flag (0xFF50).
+                    _ if !is_dmg_io_register(addr) => (),
                     // Other I/O registers
                     _ => {
                         self.io_registers[(addr - 0xff00) as usize] = value;
@@ -213,13 +229,47 @@ impl MemoryBus {
         if bits == 0 {
             return;
         }
-        let flags = self.read(0xff0f);
-        self.write(0xff0f, flags | bits);
+        self.io_registers[0x0f] |= bits & 0x1F;
     }
 
     // Getters for CPU state that depends on memory
+    /// Press or release a joypad button, requesting the Joypad interrupt on a new press.
+    /// Returns true if the press requested the interrupt.
+    pub fn set_button(&mut self, button: Button, pressed: bool) -> bool {
+        let interrupt = self.joypad.set_pressed(button, pressed);
+        if interrupt {
+            self.request_interrupt(Interrupt::Joypad);
+        }
+        interrupt
+    }
+
+    /// Advance the serial port one M-cycle, requesting the Serial interrupt when a
+    /// transfer finishes.
+    pub fn step_serial(&mut self) {
+        if self.serial.step() {
+            self.request_interrupt(Interrupt::Serial);
+        }
+    }
+
+    /// Every byte sent over the serial port so far.
+    pub fn serial_output(&self) -> &[u8] {
+        self.serial.output()
+    }
+
+    /// Read a byte for debugging: like `read`, but ignores the PPU's VRAM/OAM access
+    /// restrictions and doesn't log, so a debugger always sees the real contents.
+    pub fn peek(&self, addr: u16) -> u8 {
+        match addr {
+            0x8000..=0x9fff => self.ppu.peek_vram(addr),
+            0xfe00..=0xfe9f => self.ppu.peek_oam(addr),
+            0xfea0..=0xfeff => 0xff,
+            _ => self.read(addr),
+        }
+    }
+
+    /// Requested interrupts (IF bits 0-4)
     pub fn get_interrupt_flags(&self) -> u8 {
-        self.read(0xff0f)
+        self.io_registers[0x0f] & 0x1F
     }
 
     pub fn get_interrupt_enable(&self) -> u8 {
@@ -247,4 +297,17 @@ impl MemoryBus {
     pub fn get_ppu_mut(&mut self) -> &mut crate::ppu::Ppu {
         &mut self.ppu
     }
+}
+
+/// Whether a DMG has a register at this I/O address (0xFF00-0xFF7F). The rest read as 0xFF.
+fn is_dmg_io_register(addr: u16) -> bool {
+    matches!(
+        addr,
+        0xff00..=0xff02     // joypad, serial
+            | 0xff04..=0xff07 // timer
+            | 0xff0f          // interrupt flags
+            | 0xff10..=0xff26 // sound
+            | 0xff30..=0xff3f // wave RAM
+            | 0xff40..=0xff4b // LCD
+    )
 }

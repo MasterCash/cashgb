@@ -7,8 +7,8 @@ use log::{LevelFilter, info};
 #[command(name = "cash-gb")]
 #[command(about = "A Game Boy emulator written in Rust")]
 struct Args {
-    /// ROM file to load
-    rom_file: String,
+    /// ROM file to load. Without one, open a ROM from the File menu.
+    rom_file: Option<String>,
 
     /// Enable trace logging (shows all debug output)
     #[arg(long)]
@@ -35,21 +35,23 @@ fn main() -> eframe::Result {
         ..Default::default()
     };
 
-    // Load the cartridge
-    let cart = match read_cart(&args.rom_file) {
-        Ok(cart) => cart,
-        Err(error) => {
-            eprintln!("Error loading ROM: {}", error);
-            std::process::exit(1);
-        }
-    };
+    let mut app = App::new();
 
-    info!("Cart loaded successfully: {}", args.rom_file);
-    eframe::run_native(
-        "cash-gb",
-        native_options,
-        Box::new(|_| Ok(Box::new(App::new(cart)))),
-    )?;
+    // Load the cartridge given on the command line, if any
+    if let Some(rom_file) = args.rom_file {
+        match read_cart(&rom_file) {
+            Ok(cart) => {
+                info!("Cart loaded successfully: {}", rom_file);
+                app.load_cart(rom_file.into(), cart);
+            }
+            Err(error) => {
+                eprintln!("Error loading ROM: {}", error);
+                std::process::exit(1);
+            }
+        }
+    }
+
+    eframe::run_native("cash-gb", native_options, Box::new(|_| Ok(Box::new(app))))?;
 
     /*
     // Create CPU and display

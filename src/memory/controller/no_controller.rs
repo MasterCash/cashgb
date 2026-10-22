@@ -45,13 +45,7 @@ impl InternalMemoryBankController for NoMBC {
 impl MemoryBankController for NoMBC {
     fn read(&self, addr: u16) -> Option<u8> {
         match addr {
-            0x0000..=0x7fff => {
-                if (addr as usize) < self.rom.len() {
-                    Some(self.rom[addr as usize])
-                } else {
-                    None
-                }
-            }
+            0x0000..=0x7fff => self.rom_offset(addr).map(|offset| self.rom[offset]),
             0xA000..=0xBFFF => {
                 if let Some(ram) = &self.ram {
                     let addr = (addr - 0xA000) as usize;
@@ -64,6 +58,14 @@ impl MemoryBankController for NoMBC {
                     None
                 }
             }
+            _ => None,
+        }
+    }
+
+    fn rom_offset(&self, addr: u16) -> Option<usize> {
+        // No banking: ROM addresses map straight onto the file
+        match addr {
+            0x0000..=0x7fff if (addr as usize) < self.rom.len() => Some(addr as usize),
             _ => None,
         }
     }

@@ -69,6 +69,21 @@ impl Debug for Cart {
 }
 
 impl Cart {
+    /// Game title from the cartridge header
+    pub fn title(&self) -> &str {
+        &self.title
+    }
+
+    /// ROM size in bytes, from the cartridge header
+    pub fn rom_size(&self) -> u32 {
+        self.rom_size
+    }
+
+    /// Cartridge RAM size in bytes, from the cartridge header
+    pub fn ram_size(&self) -> u32 {
+        self.ram_size
+    }
+
     pub fn new(data: &[u8]) -> Result<Self, CartError> {
         let mut title: Vec<char> = vec![];
         let rom_code = data.get(addresses::ROM_SIZE as usize);

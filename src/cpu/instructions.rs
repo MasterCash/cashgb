@@ -379,7 +379,7 @@ impl Instruction {
     pub fn get_instruction(byte: &u8) -> Result<(Instruction, u8), UnknownInstruction> {
         match byte {
             0x00 => Ok((Instruction::Nop, 1)),
-            0x10 => Ok((Instruction::Stop, 2)),
+            0x10 => Ok((Instruction::Stop, 1)),
             0x01 | 0x11 | 0x21 | 0x31 => {
                 let target = match byte {
                     0x01 => LoadTarget::BC,
@@ -420,7 +420,7 @@ impl Instruction {
                     0x34 => IncrementTarget::HLAddr,
                     _ => IncrementTarget::HLAddr,
                 };
-                let duration = if *byte == 0x34 { 2 } else { 1 };
+                let duration = if *byte == 0x34 { 3 } else { 1 };
                 Ok((Instruction::Increment(target), duration))
             }
             0x05 | 0x15 | 0x25 | 0x35 => {
@@ -431,7 +431,7 @@ impl Instruction {
                     0x35 => DecrementTarget::HLAddr,
                     _ => panic!("Unreachable Instruction"),
                 };
-                let duration = if *byte == 0x35 { 2 } else { 1 };
+                let duration = if *byte == 0x35 { 3 } else { 1 };
                 Ok((Instruction::Decrement(target), duration))
             }
             0x06 | 0x16 | 0x26 | 0x36 => {
@@ -460,7 +460,13 @@ impl Instruction {
                     0x38 => JumpCondition::C,
                     _ => panic!("Unreachable Instruction"),
                 };
-                Ok((Instruction::JumpRelative(condition), 2))
+                // A taken conditional jump adds the third cycle itself (see `jump_relative`)
+                let duration = if condition == JumpCondition::None {
+                    3
+                } else {
+                    2
+                };
+                Ok((Instruction::JumpRelative(condition), duration))
             }
             0x09 | 0x19 | 0x29 | 0x39 => {
                 let source = match byte {
@@ -740,7 +746,7 @@ impl Instruction {
                     _ => panic!("Unreachable Instruction"),
                 };
 
-                Ok((Instruction::Push(target), 3))
+                Ok((Instruction::Push(target), 4))
             }
             0xc2 => Ok((Instruction::Jump(JumpCondition::NZ), 3)),
             0xd2 => Ok((Instruction::Jump(JumpCondition::NC), 3)),
@@ -828,10 +834,11 @@ impl Instruction {
             0x07 | 0x0f => BitwiseSource::A,
             _ => panic!("Unreachable Instruction"),
         };
-        let cycles = if source == BitwiseSource::HLAddr {
-            3
-        } else {
-            1
+        // M-cycles after the CB prefix. BIT only reads (HL); the others also write it back.
+        let cycles = match (source, byte) {
+            (BitwiseSource::HLAddr, 0x40..=0x7f) => 2,
+            (BitwiseSource::HLAddr, _) => 3,
+            _ => 1,
         };
         match byte {
             0x00..=0x07 => (Instruction::RotateLeftCircular(source, true), cycles),

@@ -11,6 +11,9 @@ mod tests;
 mod sprite_rendering_tests;
 
 #[cfg(test)]
+mod review_regressions;
+
+#[cfg(test)]
 mod debug_sprite_test;
 
 #[cfg(test)]
@@ -232,6 +235,7 @@ impl Ppu {
                 // Start new frame
                 self.scanline = 0;
                 self.registers.set_ly(0);
+                self.bg_renderer.reset_window_line();
                 self.mode = LcdMode::OamScan;
                 self.registers.set_mode(LcdMode::OamScan);
             }
@@ -282,14 +286,18 @@ impl Ppu {
 
     /// Composite background and sprite layers with proper priority
     fn composite_line(&mut self) {
+        let bg_enabled = self.registers.is_bg_window_enabled();
         for x in 0..160 {
-            // Apply background palette to background pixels first
-            self.line_buffer[x] = self.registers.get_bg_color(self.line_buffer[x]);
+            // Apply the background palette; a disabled background is always white (shade 0)
+            self.line_buffer[x] = if bg_enabled {
+                self.registers.get_bg_color(self.line_buffer[x])
+            } else {
+                0
+            };
 
-            // If a sprite pixel is present at this position and has priority
-            if self.sprite_priority_buffer[x] && self.sprite_buffer[x] != 0 {
-                // Sprite pixel overrides background pixel
-                // Note: sprite_buffer already contains palette-adjusted color from sprite renderer
+            // sprite_priority_buffer marks the pixels where a sprite is visible. The sprite
+            // buffer holds palette shades, so shade 0 (white) is still an opaque sprite pixel.
+            if self.sprite_priority_buffer[x] {
                 self.line_buffer[x] = self.sprite_buffer[x];
             }
         }
@@ -381,6 +389,22 @@ impl Ppu {
         }
     }
 
+    /// Read VRAM for debugging, ignoring the Drawing-mode access restriction.
+    pub fn peek_vram(&self, addr: u16) -> u8 {
+        self.vram
+            .get((addr as usize).wrapping_sub(0x8000))
+            .copied()
+            .unwrap_or(0xFF)
+    }
+
+    /// Read OAM for debugging, ignoring the OAM Scan/Drawing access restriction.
+    pub fn peek_oam(&self, addr: u16) -> u8 {
+        self.oam
+            .get((addr as usize).wrapping_sub(0xFE00))
+            .copied()
+            .unwrap_or(0xFF)
+    }
+
     /// Write one byte of an OAM DMA transfer. DMA has its own path into OAM,
     /// so unlike `write_oam` it isn't blocked during OAM Scan and Drawing.
     pub fn dma_write_oam(&mut self, index: usize, value: u8) {
@@ -424,6 +448,13 @@ impl Ppu {
         self.mode = LcdMode::HBlank;
         self.registers.set_mode(LcdMode::HBlank);
         self.stat_line = false;
+
+        // The screen goes blank (white) while the LCD is off; hand that frame to the display
+        let white = ColorConverter::gb_color_to_rgba(0);
+        for pixel in self.framebuffer.as_chunks_mut::<4>().0 {
+            *pixel = white;
+        }
+        self.frame_ready = true;
     }
 
     /// LCD on: start a fresh frame at line 0.
@@ -431,6 +462,7 @@ impl Ppu {
         self.dots = 0;
         self.scanline = 0;
         self.registers.set_ly(0);
+        self.bg_renderer.reset_window_line();
         self.mode = LcdMode::OamScan;
         self.registers.set_mode(LcdMode::OamScan);
     }

@@ -595,81 +595,34 @@ impl Cpu {
         self.clear_flag(Flag::N);
         self.clear_flag(Flag::H);
     }
+    /// DAA: turn A back into binary-coded decimal after a BCD addition or subtraction.
+    /// The correction depends only on A and the N, H and C flags, so it is defined for every
+    /// input, including ones that aren't valid BCD.
     pub(super) fn decimal_adjust_accumulator(&mut self) {
-        let mut c = false;
-        let mut n = 0u8;
         let a = self.register.get_a();
-        let lower = a & 0xf;
-        let upper = a >> 4;
-        let carry = self.get_flag(Flag::C);
-        let half = self.get_flag(Flag::H);
+        let subtract = self.get_flag(Flag::N);
+        let mut carry = self.get_flag(Flag::C);
+        let mut correction = 0u8;
 
-        if self.get_flag(Flag::N) {
-            match upper {
-                0x0..=0x9 if (0x0..=0x9).contains(&lower) && !half && !carry => {
-                    n = 0;
-                    c = false;
-                }
-                0x0..=0x8 if (0x6..=0xf).contains(&lower) && half && !carry => {
-                    n = 0xFA;
-                    c = false;
-                }
-                0x7..=0xf if (0x0..=0x9).contains(&lower) && !half && carry => {
-                    n = 0xA0;
-                    c = true;
-                }
-                0x6..=0xf if (0x6..=0xf).contains(&lower) && half && carry => {
-                    n = 0x9a;
-                    c = true;
-                }
-                _ => (),
-            }
-        } else {
-            match lower {
-                0x0..=0x9 if (0x0..=0x9).contains(&upper) && !half && !carry => {
-                    n = 0;
-                    c = false;
-                }
-                0xa..=0xf if (0x0..=0x8).contains(&upper) && !half && !carry => {
-                    n = 0x06;
-                    c = false;
-                }
-                0x0..=0x3 if (0x0..=0x9).contains(&upper) && half && !carry => {
-                    n = 0x06;
-                    c = false;
-                }
-                0x0..=0x9 if (0xa..=0xf).contains(&upper) && !half && !carry => {
-                    n = 0x60;
-                    c = true;
-                }
-                0xa..=0xf if (0x9..=0xf).contains(&upper) && !half && !carry => {
-                    n = 0x66;
-                    c = true;
-                }
-                0x0..=0x3 if (0xa..=0xf).contains(&upper) && half && !carry => {
-                    n = 0x66;
-                    c = true;
-                }
-                0x0..=0x9 if (0x0..=0x2).contains(&upper) && !half && carry => {
-                    n = 0x60;
-                    c = true;
-                }
-                0xa..=0xf if (0x0..=0x2).contains(&upper) && !half && carry => {
-                    n = 0x66;
-                    c = true;
-                }
-                0x0..=0x3 if (0x0..=0x3).contains(&upper) && half && carry => {
-                    n = 0x66;
-                    c = true;
-                }
-                _ => (),
-            }
+        // Low digit: it carried or borrowed, or (after an addition) went past 9
+        if self.get_flag(Flag::H) || (!subtract && a & 0x0F > 0x09) {
+            correction |= 0x06;
         }
-        let (results, _) = self.register.get_a().overflowing_add(n);
+        // High digit: same, against 0x99 for the whole byte; this also sets the carry
+        if carry || (!subtract && a > 0x99) {
+            correction |= 0x60;
+            carry = true;
+        }
+
+        let result = if subtract {
+            a.wrapping_sub(correction)
+        } else {
+            a.wrapping_add(correction)
+        };
+        self.register.set_a(result);
+        self.update_flag(Flag::Z, result == 0);
         self.clear_flag(Flag::H);
-        self.update_flag(Flag::C, c);
-        self.update_flag(Flag::Z, results == 0);
-        self.register.set_a(results);
+        self.update_flag(Flag::C, carry);
     }
     pub(super) fn restart(&mut self, addr: u16) {
         self.stack_pointer = self.stack_pointer.wrapping_sub(1);

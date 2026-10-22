@@ -67,8 +67,8 @@ impl BackgroundRenderer {
             // Which column of tiles
             let tile_col = (bg_x / 8) as u16;
 
-            // Which pixel column within the tile (0-7)
-            let pixel_col = 7 - (bg_x % 8); // Game Boy tiles are stored left-to-right
+            // Which pixel column within the tile (0 = leftmost; get_tile_pixel maps it to bit 7)
+            let pixel_col = bg_x % 8;
 
             // Get tile index from tile map
             let tile_map_addr = tile_map_base + (tile_row * 32) + tile_col;
@@ -95,11 +95,13 @@ impl BackgroundRenderer {
         }
 
         let window_y = registers.get_wy();
-        let window_x = registers.get_wx().saturating_sub(7); // WX=7 means window starts at X=0
+        // WX=7 means the window starts at X=0; WX<7 pushes it partly off the left edge
+        let window_x = registers.get_wx() as i16 - 7;
 
-        // Check if window should be visible on this line
-        if line < window_y {
-            return; // Window hasn't started yet
+        // Not visible on this line: either it hasn't started yet or it's off the right edge.
+        // The internal line counter only advances on lines where the window is drawn.
+        if line < window_y || window_x >= 160 {
+            return;
         }
 
         let window_tile_map_area = registers.window_tile_map_area();
@@ -115,10 +117,10 @@ impl BackgroundRenderer {
         let pixel_row = self.window_internal_line % 8;
 
         // Render window pixels
-        for screen_x in window_x..160 {
-            let window_pixel_x = screen_x - window_x;
+        for screen_x in window_x.max(0)..160 {
+            let window_pixel_x = (screen_x - window_x) as u8;
             let tile_col = (window_pixel_x / 8) as u16;
-            let pixel_col = 7 - (window_pixel_x % 8);
+            let pixel_col = window_pixel_x % 8;
 
             // Get tile index from window tile map
             let tile_map_addr = tile_map_base + (tile_row * 32) + tile_col;
