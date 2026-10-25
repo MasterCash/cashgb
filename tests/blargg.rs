@@ -1,22 +1,27 @@
-//! Blargg's hardware test ROMs, run headless. Each ROM reports over the serial port; see
-//! `tests/roms/blargg/README.md`.
+//! Blargg's hardware test ROMs, run headless. Most report over the serial port, and
+//! `halt_bug` only on screen; see `tests/roms/blargg/README.md`.
 
 use std::path::Path;
 
 use cash_gb::{
-    headless::{FRAMES_PER_SECOND, Headless, SerialResult},
+    headless::{FRAMES_PER_SECOND, Headless, TestResult},
     read_cart,
 };
 
-/// Run a ROM under `tests/roms/blargg/` until it reports, and fail with its serial output
-/// if it didn't pass.
-fn run_blargg(rom: &str, max_seconds: u32) {
+/// Load a ROM under `tests/roms/blargg/`.
+fn load(rom: &str) -> Headless {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/roms/blargg")
         .join(rom);
     let cart = read_cart(&path).unwrap_or_else(|error| panic!("loading {rom}: {error}"));
-    let report = Headless::new(cart).run_serial_test(max_seconds * FRAMES_PER_SECOND);
-    assert_eq!(report.result, SerialResult::Passed, "{rom}\n{report}");
+    Headless::new(cart)
+}
+
+/// Run a ROM under `tests/roms/blargg/` until it reports, and fail with its serial output
+/// if it didn't pass.
+fn run_blargg(rom: &str, max_seconds: u32) {
+    let report = load(rom).run_serial_test(max_seconds * FRAMES_PER_SECOND);
+    assert_eq!(report.result, TestResult::Passed, "{rom}\n{report}");
 }
 
 macro_rules! blargg_tests {
@@ -46,4 +51,13 @@ blargg_tests! {
     cpu_instrs_11_op_a_hl: "cpu_instrs/individual/11-op a,(hl).gb", 30;
     cpu_instrs_all: "cpu_instrs/cpu_instrs.gb", 120;
     instr_timing: "instr_timing/instr_timing.gb", 30;
+}
+
+/// HALT with an interrupt pending and IME off: the byte after HALT is read twice. This ROM
+/// reports only on screen.
+#[test]
+fn halt_bug() {
+    let rom = "halt_bug/halt_bug.gb";
+    let report = load(rom).run_screen_text_test(30 * FRAMES_PER_SECOND);
+    assert_eq!(report.result, TestResult::Passed, "{rom}\n{report}");
 }

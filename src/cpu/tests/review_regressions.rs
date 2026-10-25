@@ -26,7 +26,7 @@ fn rom(cart_type: u8, rom_code: u8, ram_code: u8, size: usize) -> Vec<u8> {
 }
 
 /// Create a CPU on a 32KB ROM-only cart with `code` placed at `at`, and PC set to `at`.
-fn cpu_with(code: &[u8], at: u16) -> Cpu {
+pub(super) fn cpu_with(code: &[u8], at: u16) -> Cpu {
     let mut data = rom(0x00, 0x00, 0x00, 0x8000);
     data[at as usize..at as usize + code.len()].copy_from_slice(code);
     let mut cpu = Cpu::new(Cart::new(&data).unwrap());
@@ -35,7 +35,7 @@ fn cpu_with(code: &[u8], at: u16) -> Cpu {
 }
 
 /// Execute `n` complete instructions.
-fn run(cpu: &mut Cpu, n: usize) {
+pub(super) fn run(cpu: &mut Cpu, n: usize) {
     for _ in 0..n {
         cpu.step_instruction();
     }

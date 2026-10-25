@@ -23,6 +23,11 @@ pub struct Cpu {
     pub(crate) instruction: Instruction,
     pub(crate) ime: bool,
     pub(crate) ime_next: bool,
+    /// IME was turned on by EI as this instruction was fetched. On hardware IME is still off
+    /// while this instruction runs, which matters for the HALT bug.
+    pub(crate) ime_just_enabled: bool,
+    /// The HALT bug: the next opcode fetch doesn't increment PC, so that byte is read twice.
+    pub(crate) halt_bug: bool,
     pub(crate) timer_register: TimerRegister,
 }
 
@@ -76,6 +81,7 @@ impl Cpu {
             // handle interrupts (this can wake up from HALT)
             self.handle_interrupts();
 
+            self.ime_just_enabled = self.ime_next;
             if self.ime_next {
                 self.ime = true;
                 self.ime_next = false;
@@ -91,7 +97,11 @@ impl Cpu {
             {
                 self.instruction = instruction;
                 self.step_count = step_count;
-                self.program_counter = self.program_counter.wrapping_add(1);
+                if self.halt_bug {
+                    self.halt_bug = false;
+                } else {
+                    self.program_counter = self.program_counter.wrapping_add(1);
+                }
             } else {
                 self.status = CpuStatus::Errored;
                 return;
@@ -111,6 +121,8 @@ impl Cpu {
             ime_next: false,
             step_count: 0,
             ime: false,
+            ime_just_enabled: false,
+            halt_bug: false,
             instruction: Instruction::Nop,
             memory: MemoryBus::new(cart),
             program_counter: 0x000,
@@ -133,6 +145,8 @@ impl Cpu {
             instruction: Nop,
             ime: false,
             ime_next: false,
+            ime_just_enabled: false,
+            halt_bug: false,
             timer_register: TimerRegister::new(),
         }
     }
@@ -147,6 +161,8 @@ impl Cpu {
         self.status = CpuStatus::Running;
         self.ime = false;
         self.ime_next = false;
+        self.ime_just_enabled = false;
+        self.halt_bug = false;
         self.program_counter = addresses::ENTRY_POINT;
         self.stack_pointer = 0xfffe;
         self.register.set_af(0x01b0);
@@ -187,10 +203,7 @@ impl Cpu {
     }
 
     pub(crate) fn write(&mut self, addr: &u16, value: u8) {
-        // Writing DIV or TAC can tick TIMA, and so overflow it
-        if let Some(interrupt) = self.timer_register.write(*addr, value) {
-            self.request_interrupt(interrupt);
-        }
+        self.timer_register.write(*addr, value);
 
         if let Some(new_status) = self.memory.write(*addr, value) {
             self.status = new_status;
@@ -238,7 +251,7 @@ impl Cpu {
             Instruction::ComplementAccumulator => self.complement_accumulator(),
             Instruction::ComplementCarryFlag => self.complement_carry_flag(),
             Instruction::DecimalAdjustAccumulator => self.decimal_adjust_accumulator(),
-            Instruction::Halt => self.status = CpuStatus::Halted,
+            Instruction::Halt => self.halt(),
             Instruction::Stop => {
                 self.program_counter = self.program_counter.wrapping_add(1);
                 self.status = CpuStatus::Stopped;
@@ -377,6 +390,19 @@ impl Cpu {
         (results, overflow, half_carry)
     }
 
+    /// HALT: wait for an interrupt. If one is already pending, the CPU doesn't halt. With IME
+    /// off (or only just turned on by EI) that triggers the HALT bug.
+    /// See <https://gbdev.io/pandocs/halt.html#halt-bug>.
+    fn halt(&mut self) {
+        let pending_interrupts =
+            self.memory.get_interrupt_flags() & self.memory.get_interrupt_enable() & 0x1F;
+        if pending_interrupts == 0 {
+            self.status = CpuStatus::Halted;
+        } else if !self.ime || self.ime_just_enabled {
+            self.halt_bug = true;
+        }
+    }
+
     /// Handle pending interrupts
     fn handle_interrupts(&mut self) {
         let interrupt_flags = self.memory.get_interrupt_flags();
@@ -420,6 +446,12 @@ impl Cpu {
     fn handle_interrupt(&mut self, interrupt: Interrupt) {
         // Disable interrupts
         self.ime = false;
+
+        // After EI; HALT the HALT bug makes the interrupt return to the HALT, not past it
+        if self.halt_bug {
+            self.halt_bug = false;
+            self.program_counter = self.program_counter.wrapping_sub(1);
+        }
 
         // Clear the interrupt flag
         let mut flags = self.memory.get_interrupt_flags();

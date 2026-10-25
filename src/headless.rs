@@ -21,9 +21,9 @@ const MOONEYE_PASSED: [u8; 6] = [3, 5, 8, 13, 21, 34];
 /// The bytes a Mooneye test ROM sends over the serial port when it fails
 const MOONEYE_FAILED: [u8; 6] = [0x42; 6];
 
-/// How a test ROM that reports over the serial port finished.
+/// How a test ROM finished.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SerialResult {
+pub enum TestResult {
     /// The ROM reported that it passed
     Passed,
     /// The ROM reported that it failed
@@ -36,20 +36,20 @@ pub enum SerialResult {
 
 /// The outcome of running a test ROM, with everything it printed.
 #[derive(Debug, Clone)]
-pub struct SerialReport {
-    pub result: SerialResult,
-    /// Everything the ROM sent over the serial port
+pub struct TestReport {
+    pub result: TestResult,
+    /// Everything the ROM printed, over the serial port or on screen
     pub output: String,
     /// Frames emulated before the result was known
     pub frames: u32,
 }
 
-impl fmt::Display for SerialReport {
+impl fmt::Display for TestReport {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let seconds = self.frames as f32 / FRAMES_PER_SECOND as f32;
         writeln!(
             f,
-            "{:?} after {} frames ({seconds:.1}s emulated). Serial output:",
+            "{:?} after {} frames ({seconds:.1}s emulated). Output:",
             self.result, self.frames
         )?;
         write!(f, "{}", self.output)
@@ -120,21 +120,56 @@ impl Headless {
             .collect()
     }
 
+    /// The background tile map as text, one line per row of tiles, for test ROMs whose font
+    /// tiles are numbered by their ASCII code, such as Blargg's. Other tiles become spaces,
+    /// and trailing spaces are trimmed.
+    pub fn background_text(&self) -> String {
+        // LCDC bit 3 selects the tile map the background is drawn from
+        let map: u16 = if self.cpu.read_memory(0xFF40) & 0x08 != 0 {
+            0x9C00
+        } else {
+            0x9800
+        };
+        (0..32)
+            .map(|row| {
+                let line: String = (0..32)
+                    .map(
+                        |column| match self.cpu.read_memory(map + row * 32 + column) {
+                            tile @ 0x20..=0x7E => tile as char,
+                            _ => ' ',
+                        },
+                    )
+                    .collect();
+                line.trim_end().to_owned()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
     /// Run a test ROM that reports over the serial port, such as Blargg's, until it prints
     /// "Passed" or "Failed", the CPU errors, or `max_frames` frames have run.
-    pub fn run_serial_test(&mut self, max_frames: u32) -> SerialReport {
-        let (result, frames) = self.run_until_result(max_frames, |output| {
-            if contains(output, b"Passed") {
-                Some(SerialResult::Passed)
-            } else if contains(output, b"Failed") {
-                Some(SerialResult::Failed)
-            } else {
-                None
-            }
+    pub fn run_serial_test(&mut self, max_frames: u32) -> TestReport {
+        let (result, frames) = self.run_until_result(max_frames, |emulator| {
+            passed_or_failed(&emulator.serial_output())
         });
-        SerialReport {
+        TestReport {
             result,
             output: self.serial_output(),
+            frames,
+        }
+    }
+
+    /// Run a test ROM that prints its result only on screen, such as Blargg's `halt_bug`,
+    /// until "Passed" or "Failed" appears in the background tile map (see
+    /// [`background_text`](Self::background_text)), the CPU errors, or `max_frames` frames
+    /// have run.
+    pub fn run_screen_text_test(&mut self, max_frames: u32) -> TestReport {
+        let (result, frames) = self.run_until_result(max_frames, |emulator| {
+            passed_or_failed(&emulator.background_text())
+        });
+        TestReport {
+            result,
+            output: self.background_text(),
             frames,
         }
     }
@@ -142,45 +177,57 @@ impl Headless {
     /// Run a Mooneye test ROM until it sends its pass or fail bytes over the serial port,
     /// the CPU errors, or `max_frames` frames have run. The report's output lists the bytes
     /// sent, in hex, since they aren't text.
-    pub fn run_mooneye_test(&mut self, max_frames: u32) -> SerialReport {
-        let (result, frames) = self.run_until_result(max_frames, |output| {
+    pub fn run_mooneye_test(&mut self, max_frames: u32) -> TestReport {
+        let (result, frames) = self.run_until_result(max_frames, |emulator| {
+            let output = emulator.cpu.serial_output();
             if contains(output, &MOONEYE_PASSED) {
-                Some(SerialResult::Passed)
+                Some(TestResult::Passed)
             } else if contains(output, &MOONEYE_FAILED) {
-                Some(SerialResult::Failed)
+                Some(TestResult::Failed)
             } else {
                 None
             }
         });
-        SerialReport {
+        TestReport {
             result,
             output: format!("{:02X?}", self.cpu.serial_output()),
             frames,
         }
     }
 
-    /// Run frames until `check` finds a result in the serial output, the CPU errors, or
-    /// `max_frames` frames have run. Returns the result and the frames run.
+    /// Run frames until `check` finds a result, the CPU errors, or `max_frames` frames have
+    /// run. Returns the result and the frames run.
     fn run_until_result(
         &mut self,
         max_frames: u32,
-        check: impl Fn(&[u8]) -> Option<SerialResult>,
-    ) -> (SerialResult, u32) {
+        check: impl Fn(&Self) -> Option<TestResult>,
+    ) -> (TestResult, u32) {
         let mut frames = 0;
         let result = loop {
-            if let Some(result) = check(self.cpu.serial_output()) {
+            if let Some(result) = check(self) {
                 break result;
             }
             if self.cpu.status == CpuStatus::Errored {
-                break SerialResult::CpuErrored;
+                break TestResult::CpuErrored;
             }
             if frames >= max_frames {
-                break SerialResult::TimedOut;
+                break TestResult::TimedOut;
             }
             self.run_frame();
             frames += 1;
         };
         (result, frames)
+    }
+}
+
+/// The result in text a test ROM printed, if it has printed "Passed" or "Failed" yet.
+fn passed_or_failed(output: &str) -> Option<TestResult> {
+    if output.contains("Passed") {
+        Some(TestResult::Passed)
+    } else if output.contains("Failed") {
+        Some(TestResult::Failed)
+    } else {
+        None
     }
 }
 
@@ -197,6 +244,28 @@ mod tests {
 
     /// A ROM that prints `text` over the serial port and then loops forever.
     fn printing_rom(text: &[u8]) -> Cart {
+        let mut code = Vec::new();
+        for &byte in text {
+            // LD A,byte; LDH (01),A; LD A,81; LDH (02),A
+            code.extend_from_slice(&[0x3E, byte, 0xE0, 0x01, 0x3E, 0x81, 0xE0, 0x02]);
+        }
+        rom_running(&code)
+    }
+
+    /// A ROM that turns the LCD off, writes `text` to the start of the 0x9800 tile map, and
+    /// then loops forever.
+    fn screen_printing_rom(text: &[u8]) -> Cart {
+        // XOR A; LDH (40),A; LD HL,9800
+        let mut code = vec![0xAF, 0xE0, 0x40, 0x21, 0x00, 0x98];
+        for &byte in text {
+            // LD A,byte; LD (HL+),A
+            code.extend_from_slice(&[0x3E, byte, 0x22]);
+        }
+        rom_running(&code)
+    }
+
+    /// A ROM that runs `code` from 0x150 and then loops forever.
+    fn rom_running(code: &[u8]) -> Cart {
         let mut rom = vec![0u8; 0x8000];
         rom[0x100..0x104].copy_from_slice(&[0xC3, 0x50, 0x01, 0x00]); // JP 0150
         rom[0x104..0x104 + NINTENDO_LOGO.len()].copy_from_slice(&NINTENDO_LOGO);
@@ -206,14 +275,28 @@ mod tests {
         }
         rom[0x14D] = checksum;
 
-        let mut code = Vec::new();
-        for &byte in text {
-            // LD A,byte; LDH (01),A; LD A,81; LDH (02),A
-            code.extend_from_slice(&[0x3E, byte, 0xE0, 0x01, 0x3E, 0x81, 0xE0, 0x02]);
-        }
-        code.extend_from_slice(&[0x18, 0xFE]); // JR -2
-        rom[0x150..0x150 + code.len()].copy_from_slice(&code);
+        rom[0x150..0x150 + code.len()].copy_from_slice(code);
+        rom[0x150 + code.len()..][..2].copy_from_slice(&[0x18, 0xFE]); // JR -2
         Cart::new(&rom).unwrap()
+    }
+
+    #[test]
+    fn screen_text_test_passes_when_rom_shows_passed() {
+        let mut emulator = Headless::new(screen_printing_rom(b"Passed"));
+
+        let report = emulator.run_screen_text_test(60);
+
+        assert_eq!(report.result, TestResult::Passed, "{report}");
+        assert!(report.output.starts_with("Passed\n"), "{report}");
+    }
+
+    #[test]
+    fn screen_text_test_fails_when_rom_shows_failed() {
+        let mut emulator = Headless::new(screen_printing_rom(b"Failed"));
+
+        let report = emulator.run_screen_text_test(60);
+
+        assert_eq!(report.result, TestResult::Failed, "{report}");
     }
 
     #[test]
@@ -222,7 +305,7 @@ mod tests {
 
         let report = emulator.run_serial_test(60);
 
-        assert_eq!(report.result, SerialResult::Passed, "{report}");
+        assert_eq!(report.result, TestResult::Passed, "{report}");
         assert_eq!(report.output, "01-special\n\nPassed\n");
     }
 
@@ -232,7 +315,7 @@ mod tests {
 
         let report = emulator.run_serial_test(60);
 
-        assert_eq!(report.result, SerialResult::Failed, "{report}");
+        assert_eq!(report.result, TestResult::Failed, "{report}");
     }
 
     #[test]
@@ -241,7 +324,7 @@ mod tests {
 
         let report = emulator.run_mooneye_test(60);
 
-        assert_eq!(report.result, SerialResult::Passed, "{report}");
+        assert_eq!(report.result, TestResult::Passed, "{report}");
         assert_eq!(report.output, "[03, 05, 08, 0D, 15, 22]");
     }
 
@@ -251,7 +334,7 @@ mod tests {
 
         let report = emulator.run_mooneye_test(60);
 
-        assert_eq!(report.result, SerialResult::Failed, "{report}");
+        assert_eq!(report.result, TestResult::Failed, "{report}");
     }
 
     #[test]
@@ -271,7 +354,7 @@ mod tests {
 
         let report = emulator.run_serial_test(5);
 
-        assert_eq!(report.result, SerialResult::TimedOut);
+        assert_eq!(report.result, TestResult::TimedOut);
         assert_eq!(report.frames, 5);
     }
 

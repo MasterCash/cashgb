@@ -16,3 +16,8 @@ The ROM files are unmodified and keep their original names.
 | `cpu_instrs/cpu_instrs.gb` | Every CPU instruction except STOP and the illegal opcodes, all 11 groups in one ROM |
 | `cpu_instrs/individual/*.gb` | The same 11 groups as separate ROMs, for narrowing down a failure |
 | `instr_timing/instr_timing.gb` | How many cycles each instruction takes |
+| `halt_bug/halt_bug.gb` | The HALT bug: HALT with IME off and an interrupt pending reads the next byte twice |
+
+`halt_bug.gb` doesn't use the serial port: it prints `Passed` or `Failed` only on screen. Its
+font tiles are numbered by ASCII code, so the test reads the text from the background tile
+map (`Headless::run_screen_text_test`).

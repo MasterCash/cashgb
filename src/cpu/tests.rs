@@ -8,6 +8,9 @@ mod comprehensive_integration_tests;
 mod review_regressions;
 
 #[cfg(test)]
+mod halt_bug;
+
+#[cfg(test)]
 mod cpu_tests {
     use crate::cpu::Cpu;
     use crate::cpu::instructions::*;

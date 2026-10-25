@@ -22,20 +22,20 @@ Mature emulators prove correctness with community test ROMs. They are the cheape
   - [x] Serial port output (`0xFF01`/`0xFF02`), which Blargg's tests use to report results
   - [x] Blargg `cpu_instrs` and `instr_timing` (`tests/blargg.rs`)
   - [x] dmg-acid2: one reference screenshot that covers most PPU rendering rules (`tests/dmg_acid2.rs`, passes)
-  - [x] Mooneye test suite: timing, interrupt and MBC edge cases (`tests/mooneye.rs`). 36 of 79 pass; the rest are `#[ignore]`d with a reason.
+  - [x] Mooneye test suite: timing, interrupt and MBC edge cases (`tests/mooneye.rs`). 39 of 79 pass; the rest are `#[ignore]`d with a reason.
 - [ ] **Pass the ignored Mooneye tests.** Remove each `#[ignore]` as its test starts passing:
   - [ ] 21 CPU timing tests (`call_timing`, `push_timing`, `intr_timing`, `oam_dma_timing`, ...): need cycle-accurate memory timing, below
+  - [ ] Interrupt dispatch should take 5 M-cycles. `handle_interrupt` sets `step_count = 5`, but `Cpu::step` then fetches the vector's first instruction in the same M-cycle, which overwrites it.
   - [ ] 11 PPU timing tests (`ppu/*`): need accurate mode timing and variable-length mode 3, below
-  - [ ] 3 timer reload tests (`tima_reload`, `tima_write_reloading`, `tma_write_reloading`): the TMA reload delay, below
   - [ ] 3 post-boot state tests (`boot_div`, `boot_hwio`, `serial/boot_sclk_align`): DIV, I/O registers and the serial clock should start as the boot ROM leaves them
   - [ ] `bits/unused_hwio`: unused bits of I/O registers should read back as 1
   - [ ] `oam_dma_restart` and `oam_dma/sources`: OAM DMA restarting mid-transfer, and DMA from every source region
   - [ ] `mbc1/ram_64kb`: MBC1 with 64 KiB of cart RAM
   - [ ] `mbc1/multicart_rom_8Mb`: detect MBC1 multicarts (MBC1M), which wire the bank bits differently
-- [ ] **Timer accuracy:**
+- [x] **Timer accuracy:** all 13 Mooneye timer tests pass
   - [x] Writing DIV resets the internal counter that TIMA is derived from
-  - [ ] TIMA reloads from TMA one cycle after it overflows.
-- [ ] **HALT bug:** when HALT runs with IME off and an interrupt pending, the next opcode byte is read twice.
+  - [x] TIMA reads 0 for one M-cycle after it overflows, then reloads from TMA and requests the interrupt; writes to TIMA and TMA around the reload behave as on a DMG
+- [x] **HALT bug:** when HALT runs with IME off and an interrupt pending, the next opcode byte is read twice; after `EI; HALT` the interrupt returns to the HALT. Checked by Blargg's `halt_bug` (`tests/blargg.rs`).
 - [ ] **Cycle-accurate memory timing:** memory reads and writes happen on the M-cycle they occur in, rather than when the instruction finishes.
 - [ ] **Variable-length PPU mode 3**, depending on SCX, the window and sprites.
 - [ ] **Boot ROM support:** run the real DMG boot ROM, which scrolls the Nintendo logo in. `dmg_boot.bin` is currently an empty file.

@@ -126,6 +126,9 @@ impl Default for Register {
 /// upper 8 bits. TIMA increments when the counter bit selected by TAC goes from 1 to 0 while
 /// the timer is enabled. Because everything hangs off that one counter, writing DIV (which
 /// clears the counter) or changing TAC can itself cause a TIMA increment, as on a real DMG.
+///
+/// When TIMA overflows it reads 0 for one M-cycle, and only in the next M-cycle is it loaded
+/// from TMA and the Timer interrupt requested (see [`TimaReload`]).
 /// See <https://gbdev.io/pandocs/Timer_Obscure_Behaviour.html>.
 pub struct TimerRegister {
     /// Internal counter, advanced by 4 every M-cycle. DIV is the upper byte.
@@ -136,6 +139,21 @@ pub struct TimerRegister {
     tma: u8,
     /// Timer Control (TAC): bit 2 enables TIMA, bits 0-1 select its frequency
     tac: u8,
+    /// Where TIMA is in reloading from TMA after an overflow
+    reload: TimaReload,
+}
+
+/// The delayed reload of TIMA from TMA after TIMA overflows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TimaReload {
+    /// TIMA is counting normally
+    Idle,
+    /// TIMA overflowed this M-cycle and reads 0. Writing TIMA now cancels the reload and
+    /// the interrupt.
+    Overflowed,
+    /// TIMA was loaded from TMA this M-cycle. Writes to TIMA are ignored, and writes to TMA
+    /// also go to TIMA.
+    Reloading,
 }
 
 impl TimerRegister {
@@ -145,28 +163,49 @@ impl TimerRegister {
             tima: 0,
             tma: 0,
             tac: 0,
+            reload: TimaReload::Idle,
         }
     }
 
-    /// Advance one M-cycle. Returns the Timer interrupt when TIMA overflows.
+    /// Advance one M-cycle. Returns the Timer interrupt in the M-cycle after TIMA overflows,
+    /// when TIMA is reloaded from TMA.
     pub fn step(&mut self) -> Option<Interrupt> {
-        self.update(|timer| timer.counter = timer.counter.wrapping_add(4))
+        let interrupt = match self.reload {
+            TimaReload::Overflowed => {
+                self.tima = self.tma;
+                self.reload = TimaReload::Reloading;
+                Some(Interrupt::Timer)
+            }
+            TimaReload::Reloading => {
+                self.reload = TimaReload::Idle;
+                None
+            }
+            TimaReload::Idle => None,
+        };
+        self.update(|timer| timer.counter = timer.counter.wrapping_add(4));
+        interrupt
     }
 
-    /// Write a timer register. Returns the Timer interrupt if the write made TIMA overflow.
-    pub fn write(&mut self, addr: u16, value: u8) -> Option<Interrupt> {
+    /// Write a timer register, as the CPU does after this M-cycle's [`step`](Self::step).
+    pub fn write(&mut self, addr: u16, value: u8) {
         match addr {
             0xff04 => self.update(|timer| timer.counter = 0), // any write clears the counter
-            0xff05 => {
-                self.tima = value;
-                None
-            }
+            0xff05 => match self.reload {
+                TimaReload::Idle => self.tima = value,
+                TimaReload::Overflowed => {
+                    self.tima = value;
+                    self.reload = TimaReload::Idle;
+                }
+                TimaReload::Reloading => (), // the reload from TMA wins
+            },
             0xff06 => {
                 self.tma = value;
-                None
+                if self.reload == TimaReload::Reloading {
+                    self.tima = value;
+                }
             }
             0xff07 => self.update(|timer| timer.tac = value & 0x07),
-            _ => None,
+            _ => (),
         }
     }
 
@@ -202,24 +241,20 @@ impl TimerRegister {
 
     /// Apply a change to the counter or TAC, and increment TIMA if it made the timer signal
     /// fall from 1 to 0.
-    fn update(&mut self, change: impl FnOnce(&mut Self)) -> Option<Interrupt> {
+    fn update(&mut self, change: impl FnOnce(&mut Self)) {
         let before = self.timer_signal();
         change(self);
         if before && !self.timer_signal() {
-            self.increment_tima()
-        } else {
-            None
+            self.increment_tima();
         }
     }
 
-    fn increment_tima(&mut self) -> Option<Interrupt> {
+    /// Increment TIMA. On overflow it holds 0 until the next M-cycle reloads it from TMA.
+    fn increment_tima(&mut self) {
         let (tima, overflowed) = self.tima.overflowing_add(1);
+        self.tima = tima;
         if overflowed {
-            self.tima = self.tma;
-            Some(Interrupt::Timer)
-        } else {
-            self.tima = tima;
-            None
+            self.reload = TimaReload::Overflowed;
         }
     }
 }
@@ -286,17 +321,64 @@ mod timer_tests {
         assert_eq!(timer.read(0xff05), Some(0));
     }
 
-    #[test]
-    fn overflow_reloads_tma_and_requests_interrupt() {
+    /// A timer with TIMA = 0xFF and TMA = 0xAB, counting every 4 M-cycles, stepped to the
+    /// M-cycle in which TIMA overflows.
+    fn timer_at_overflow() -> TimerRegister {
         let mut timer = TimerRegister::new();
         timer.write(0xff05, 0xFF);
         timer.write(0xff06, 0xAB);
-        timer.write(0xff07, 0x05); // enabled, every 4 M-cycles
+        timer.write(0xff07, 0x05);
+        for _ in 0..4 {
+            assert_eq!(timer.step(), None);
+        }
+        timer
+    }
 
-        let interrupts: Vec<_> = (0..4).filter_map(|_| timer.step()).collect();
+    #[test]
+    fn overflow_reads_zero_for_one_cycle_then_reloads_tma() {
+        let mut timer = timer_at_overflow();
+        assert_eq!(timer.read(0xff05), Some(0x00), "overflow cycle");
 
-        assert_eq!(interrupts, [Interrupt::Timer]);
+        assert_eq!(timer.step(), Some(Interrupt::Timer));
         assert_eq!(timer.read(0xff05), Some(0xAB));
+        assert_eq!(timer.step(), None, "only one interrupt");
+    }
+
+    #[test]
+    fn writing_tima_in_the_overflow_cycle_cancels_the_reload() {
+        let mut timer = timer_at_overflow();
+        timer.write(0xff05, 0x42);
+
+        assert_eq!(timer.step(), None, "no interrupt");
+        assert_eq!(timer.read(0xff05), Some(0x42));
+    }
+
+    #[test]
+    fn writing_tima_in_the_reload_cycle_is_ignored() {
+        let mut timer = timer_at_overflow();
+        timer.step();
+        timer.write(0xff05, 0x42);
+
+        assert_eq!(timer.read(0xff05), Some(0xAB));
+    }
+
+    #[test]
+    fn writing_tma_in_the_reload_cycle_also_loads_tima() {
+        let mut timer = timer_at_overflow();
+        timer.step();
+        timer.write(0xff06, 0x42);
+
+        assert_eq!(timer.read(0xff05), Some(0x42));
+        assert_eq!(timer.read(0xff06), Some(0x42));
+    }
+
+    #[test]
+    fn writing_tma_in_the_overflow_cycle_reloads_the_new_value() {
+        let mut timer = timer_at_overflow();
+        timer.write(0xff06, 0x42);
+
+        timer.step();
+        assert_eq!(timer.read(0xff05), Some(0x42));
     }
 
     #[test]

@@ -4,7 +4,7 @@
 use std::path::Path;
 
 use cash_gb::{
-    headless::{FRAMES_PER_SECOND, Headless, SerialResult},
+    headless::{FRAMES_PER_SECOND, Headless, TestResult},
     read_cart,
 };
 
@@ -19,7 +19,7 @@ fn run_mooneye(rom: &str) {
         .join(rom);
     let cart = read_cart(&path).unwrap_or_else(|error| panic!("loading {rom}: {error}"));
     let report = Headless::new(cart).run_mooneye_test(MAX_SECONDS * FRAMES_PER_SECOND);
-    assert_eq!(report.result, SerialResult::Passed, "{rom}\n{report}");
+    assert_eq!(report.result, TestResult::Passed, "{rom}\n{report}");
 }
 
 macro_rules! mooneye_tests {
@@ -136,11 +136,8 @@ mooneye_tests! {
     timer_tim10_div_trigger: "acceptance/timer/tim10_div_trigger.gb";
     timer_tim11: "acceptance/timer/tim11.gb";
     timer_tim11_div_trigger: "acceptance/timer/tim11_div_trigger.gb";
-    #[ignore = "TIMA reload from TMA is not delayed by one cycle"]
     timer_tima_reload: "acceptance/timer/tima_reload.gb";
-    #[ignore = "TIMA reload from TMA is not delayed by one cycle"]
     timer_tima_write_reloading: "acceptance/timer/tima_write_reloading.gb";
-    #[ignore = "TIMA reload from TMA is not delayed by one cycle"]
     timer_tma_write_reloading: "acceptance/timer/tma_write_reloading.gb";
     mbc1_bits_bank1: "emulator-only/mbc1/bits_bank1.gb";
     mbc1_bits_bank2: "emulator-only/mbc1/bits_bank2.gb";
